@@ -58,7 +58,8 @@ def _pick_llm(speaker: str, serve_cfg: dict):
             from .llama_llm import LlamaPersonaLLM
 
             return LlamaPersonaLLM(speaker, base_url=base_url, use_rag=use_rag,
-                                   max_new_tokens=max_new, temperature=temperature)
+                                   max_new_tokens=max_new, temperature=temperature,
+                                   rag_cfg=llm_cfg)
         except Exception as e:  # noqa: BLE001
             log.warning("llama-server LLM 불가(%s) — 다음 백엔드", e)
             if backend == "llama":

@@ -36,7 +36,7 @@ class LlamaPersonaLLM:
     def __init__(self, speaker: str, base_url: str = "http://127.0.0.1:8080",
                  max_new_tokens: int = 80, temperature: float = 0.7,
                  use_rag: bool = True, timeout: float = 60.0,
-                 probe: bool = True):
+                 probe: bool = True, rag_cfg: dict | None = None):
         self.speaker = speaker
         self.base_url = base_url.rstrip("/")
         self.url = f"{self.base_url}/v1/chat/completions"
@@ -49,7 +49,7 @@ class LlamaPersonaLLM:
             try:
                 from ..llm.rag import UtteranceRAG
 
-                self._rag = UtteranceRAG(speaker)
+                self._rag = UtteranceRAG(speaker, cfg=rag_cfg or {})
             except Exception as e:  # noqa: BLE001
                 log.warning("RAG 비활성(%s)", e)
         if probe:
@@ -76,7 +76,7 @@ class LlamaPersonaLLM:
             try:
                 ctx = self._rag.context(user_text, k=3)
                 if ctx:
-                    sys += f"\n\n[참고할 실제 발화]\n{ctx}"
+                    sys += f"\n\n[이 사람에 대해 기억하는 것]\n{ctx}"
             except Exception:  # noqa: BLE001
                 pass
         sys += "\n전화 통화처럼 1~2문장으로 짧고 자연스럽게 답한다."

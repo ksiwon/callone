@@ -23,6 +23,9 @@ piper-tts>=1.2
 soundfile>=0.12
 sounddevice>=0.4        # scripts/call_mic.py 마이크 통화
 
+# --- 기억 회상(의미검색, onnx — torch 불필요) ---
+fastembed>=0.3          # memories.json 의미검색(rag.py). extract_memories.py 로 사실 추출 후 사용
+
 # 참고:
 #  - LoRA→GGUF 변환(make_gguf.py)은 1회성이라 별도: pip install torch peft "transformers>=5.10"
 #  - Piper 음성 학습은 GPU에서: scripts/setup_piper_gpu.sh (이 파일과 무관)

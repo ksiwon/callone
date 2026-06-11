@@ -23,7 +23,10 @@ llm:
   backend: auto                # auto | llama | ov | vllm
   base_url: "http://127.0.0.1:8080"   # llama-server 주소
   config: llm_phone            # llm_server(서버) | llm_phone(노트북)
-  use_rag: false               # LoRA 가 말투 내재화 → 일상대화 RAG off 가 자연스러움(삼천포 방지)
+  # 기억 회상: extract_memories.py 로 memories.json 만든 뒤 true 권장(의미검색=삼천포 없음).
+  # memories.json 없으면 날것 발화 폴백이라 산만 → 그땐 false 유지.
+  use_rag: false               # 사실 추출 후 true 로
+  embedder: "intfloat/multilingual-e5-small"   # fastembed(onnx, torch-free) 다국어 임베더
   temperature: 0.5             # 낮추면 덜 산만
   max_new_tokens: 80           # 전화 턴 짧게(LoRA 가 길게 주절거리는 것 캡)
 tts:

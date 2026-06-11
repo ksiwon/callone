@@ -1,7 +1,11 @@
-"""S5 RAG (§15.2 층3) — 실제 발화 임베딩 → 벡터DB 검색.
+"""S5 기억 회상 (§15.2) — 화자 '사실(기억)' 의미 검색.
 
-EmbeddingGemma 로 화자 발화 임베딩 → FAISS 색인 → 질의 시 유사 발화 검색.
-"예전에 ~했잖아" 일관성/사실성. 임베더 미설치 시 키워드 폴백.
+Mem0 식 2단계의 2단계(검색). 우선순위:
+  1) memories.json (extract_memories.py 가 뽑은 원자적 사실) — 삼천포 없이 정밀 회상
+  2) utterances.json (날것 발화) — memories 없을 때 폴백
+
+임베딩은 **fastembed(onnxruntime, torch 불필요)** → torch-free 서빙에 그대로 맞음.
+fastembed 미설치/실패 시 키워드 검색 폴백. 임베딩은 디스크 캐시(memories_emb.npy).
 """
 from __future__ import annotations
 
@@ -14,71 +18,105 @@ from ..common.logging import get_logger
 
 log = get_logger("rag")
 
-_EMBED_MODEL = "google/embeddinggemma"
+# 다국어(한국어 포함) 경량 임베더. cfg 의 'embedder' 로 교체 가능.
+_EMBED_MODEL = "intfloat/multilingual-e5-small"
 
 
 class UtteranceRAG:
-    def __init__(self, speaker: str, cfg: dict | None = None, use_vectors: bool = False):
-        # use_vectors=False(기본): 키워드 검색 — 빠르고 임베더 다운로드 없음(EmbeddingGemma는
-        # 게이트+대용량이라 온디바이스 초기화가 느림/행). 정밀 의미검색 필요시 use_vectors=True.
+    def __init__(self, speaker: str, cfg: dict | None = None, use_vectors: bool = True):
         self.speaker = speaker
         self.cfg = cfg or {}
-        self.use_vectors = use_vectors or (cfg or {}).get("use_vectors", False)
+        self.use_vectors = use_vectors and not (cfg or {}).get("keyword_only", False)
+        self.model_name = (cfg or {}).get("embedder", _EMBED_MODEL)
+        self.kind = "memories"          # memories | utterances
         self.texts: list[str] = []
-        self.index = None
+        self._emb: np.ndarray | None = None
         self._embedder = None
         self._build()
 
+    # ----- 소스 로드: memories 우선, 없으면 utterances ---------------------
+    def _spk_dir(self) -> Path:
+        return data_dir() / "speakers" / self.speaker
+
     def _load_texts(self) -> list[str]:
-        # ⚠️ 서빙 프로세스에선 pandas 금지(OpenVINO 와 segfault). 사전 export 된
-        #    plain JSON(utterances.json)만 읽는다(json, torch/pandas 무관).
-        #    JSON 없으면 precompute(오프라인)에서 parquet→json 생성 후 사용.
-        up = data_dir() / "speakers" / self.speaker / "utterances.json"
-        if up.exists():
+        mp = self._spk_dir() / "memories.json"
+        if mp.exists():
             try:
-                return [t for t in read_json(up) if isinstance(t, str) and t.strip()]
+                t = [x for x in read_json(mp) if isinstance(x, str) and x.strip()]
+                if t:
+                    self.kind = "memories"
+                    return t
             except Exception:  # noqa: BLE001
                 pass
-        log.warning("발화 JSON 없음(%s) — scripts/precompute_voice_emb.py 로 생성", up)
+        up = self._spk_dir() / "utterances.json"
+        if up.exists():
+            try:
+                self.kind = "utterances"
+                return [x for x in read_json(up) if isinstance(x, str) and x.strip()]
+            except Exception:  # noqa: BLE001
+                pass
+        log.warning("기억/발화 없음(%s) — extract_memories.py 로 생성 권장", self._spk_dir())
         return []
+
+    # ----- 임베딩(fastembed, onnx) ---------------------------------------
+    def _is_e5(self) -> bool:
+        return "e5" in self.model_name.lower()
 
     def _get_embedder(self):
         if self._embedder is None:
-            from sentence_transformers import SentenceTransformer  # type: ignore
+            from fastembed import TextEmbedding  # type: ignore  # onnxruntime 기반(torch X)
 
-            self._embedder = SentenceTransformer(
-                self.cfg.get("embedder", _EMBED_MODEL))
+            self._embedder = TextEmbedding(self.model_name)
         return self._embedder
 
+    def _embed(self, texts: list[str], is_query: bool) -> np.ndarray:
+        if self._is_e5():  # e5 계열은 prefix 필요
+            pre = "query: " if is_query else "passage: "
+            texts = [pre + t for t in texts]
+        vecs = np.asarray(list(self._get_embedder().embed(texts)), dtype=np.float32)
+        n = np.linalg.norm(vecs, axis=1, keepdims=True)   # 정규화(코사인=내적)
+        return vecs / np.clip(n, 1e-9, None)
+
     def _build(self):
-        self.texts = [t for t in self._load_texts() if t.strip()]
+        self.texts = self._load_texts()
         if not self.texts:
             return
         if not self.use_vectors:
-            log.info("RAG(키워드) %s: %d 발화", self.speaker, len(self.texts))
+            log.info("RAG(키워드) %s: %s %d개", self.speaker, self.kind, len(self.texts))
             return
+        cache = self._spk_dir() / "memories_emb.npy"
         try:
-            import faiss  # type: ignore
-
-            emb = self._get_embedder().encode(self.texts, normalize_embeddings=True)
-            self.index = faiss.IndexFlatIP(emb.shape[1])
-            self.index.add(np.asarray(emb, dtype=np.float32))
-            log.info("RAG 벡터색인 %s: %d 발화", self.speaker, len(self.texts))
+            if cache.exists():
+                arr = np.load(cache)
+                if arr.shape[0] == len(self.texts):
+                    self._emb = arr
+            if self._emb is None:
+                self._emb = self._embed(self.texts, is_query=False)
+                try:
+                    np.save(cache, self._emb)
+                except Exception:  # noqa: BLE001
+                    pass
+            log.info("RAG(의미검색) %s: %s %d개 (%s)",
+                     self.speaker, self.kind, len(self.texts), self.model_name)
         except Exception as e:  # noqa: BLE001
-            log.warning("벡터 색인 불가(%s) — 키워드 폴백", e)
-            self.index = None
+            log.warning("임베더 불가(%s) — 키워드 폴백", e)
+            self._emb = None
+            self.use_vectors = False
 
+    # ----- 검색 -----------------------------------------------------------
     def search(self, query: str, k: int = 3) -> list[str]:
         if not self.texts:
             return []
-        if self.index is not None:
-            q = self._get_embedder().encode([query], normalize_embeddings=True)
-            _, idx = self.index.search(np.asarray(q, dtype=np.float32), k)
-            return [self.texts[i] for i in idx[0] if i < len(self.texts)]
-        # 키워드 폴백
+        if self._emb is not None:
+            try:
+                q = self._embed([query], is_query=True)[0]
+                sims = self._emb @ q
+                idx = np.argsort(-sims)[:k]
+                return [self.texts[i] for i in idx]
+            except Exception as e:  # noqa: BLE001
+                log.warning("의미검색 오류(%s) — 키워드", e)
         toks = set(query.split())
-        scored = sorted(self.texts, key=lambda t: -len(toks & set(t.split())))
-        return scored[:k]
+        return sorted(self.texts, key=lambda t: -len(toks & set(t.split())))[:k]
 
     def context(self, query: str, k: int = 3) -> str:
         hits = self.search(query, k)
