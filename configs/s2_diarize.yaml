@@ -1,0 +1,17 @@
+# S2 화자 분리 + 전역 연결 + 제3자 제거 (§10, 부록 A)
+asr_model: "models/asr_dialect"        # 적응본, 없으면 "large-v3"
+language: "ko"
+min_speakers: 2
+max_speakers: 3                         # 제3자 대비
+embedding: "speechbrain/spkrec-ecapa-voxceleb"
+# 화자 분리: community-1(pyannote.audio 4.0, 2026-02). 3.1보다 화자 카운팅/귀속 우수,
+# 잡음 많은 실전 통화에 강함, 무료(CC-BY-4.0). ⚠️ precision-2(유료) 금지 유지(§2).
+diarizer: "pyannote/speaker-diarization-community-1"
+diarizer_fallback: "pyannote/speaker-diarization-3.1"
+link:
+  n_ref_calls: 20
+  sim_threshold: 0.55                   # 두 센트로이드 모두 미만이면 drop
+  cluster: "kmeans"                     # 2화자 통화엔 KMeans k=2 가 신뢰성↑ (hdbscan 은 이상치 탐지용, 튜닝 민감)
+filters:
+  min_snr_db: 10
+  drop_overlap_for_tts: true

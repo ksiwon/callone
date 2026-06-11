@@ -1,0 +1,66 @@
+# callone 무거운 의존성 — GPU/대용량 모델 (§6)
+# H100 학습/서버 노드. 전부 무료 오픈소스.
+#
+# ⚠️ 설치 순서 중요(로컬 디버깅으로 확정된 호환 핀). 아래 순서대로:
+#
+# 1) torch 3종 세트를 CUDA 버전 맞춰 "함께" 설치 (버전 어긋나면 torchvision nms/torchcodec 에러)
+#    예(CUDA 12.1):
+#      pip install --index-url https://download.pytorch.org/whl/cu121 \
+#                  torch torchvision torchaudio
+#    → 반드시 같은 명령으로 3개 함께. 따로 깔면 버전 불일치.
+#
+# 2) 그 다음 이 파일:  pip install -r requirements-heavy.txt
+#
+# 3) 마지막에 numpy 핀 재확인(다른 패키지가 2.4로 올리면 numba/librosa 깨짐):
+#      pip install "numpy<2.4"
+
+# --- 버전 핀 (데이터 파이프라인용 — 건드리지 말 것) ---
+# 일관 스택: pyannote 3.x + huggingface_hub<1.0 + torch 2.6+cu124.
+#   pyannote 3.x 는 use_auth_token 을 쓰므로 hub<1.0 필요(hub 1.x는 use_auth_token 제거).
+# ⚠️ Gemma 학습(S5)은 transformers>=5 + hub>=1.5 + torch>=2.8 가 필요 → 별도 venv 권장.
+numpy<2.4                 # 2.4+ 는 numba/librosa 깨뜨림
+speechbrain==1.0.2        # 1.1.0 은 pyannote 로드시 k2_fsa lazy import 버그
+huggingface_hub<1.0       # pyannote 3.x 호환 (0.25.x)
+transformers<4.50         # 4.44.x — torchmetrics/pyannote 가 import. hub<1.0 와 호환되는 버전 필요.
+pyannote.audio>=3.1,<4    # 3.1 파이프라인. (4.x=community-1 은 torch>=2.8 필요 — 드라이버 535 등 구형 GPU엔 torch 2.6+cu124가 안전)
+
+# --- LLM / 파인튜닝 ---
+peft>=0.13
+accelerate>=1.0
+bitsandbytes>=0.44        # QLoRA 4bit (CUDA 전용 — CPU 노트북 학습 불가)
+datasets>=3.0
+trl>=0.12
+# vllm                    # 서버 추론(Gemma 4 12B). transformers/pydantic 버전 민감 — 별도 환경 권장
+
+# --- ASR ---
+faster-whisper>=1.0
+jiwer>=3.0                # WER 평가
+# whisperx               # (선택) pyannote 직접 경로가 있어 필수는 아님
+
+# --- 화자 분리 / 임베딩 ---
+# hdbscan 은 소스빌드(Cython) 필요 → setup_server.sh 가 --no-build-isolation 으로 별도 설치.
+#   pip install Cython && pip install "hdbscan>=0.8" --no-build-isolation
+#   미설치여도 KMeans 폴백으로 동작(필수 아님).
+scikit-learn>=1.3
+
+# --- 음질 복원 (전부 선택 — 미설치 시 S1 은 리샘플 폴백) ---
+# deepfilternet>=0.5      # rust 빌드 필요할 수 있음 → 필요시 별도: pip install deepfilternet
+# resemble-enhance        # 대역확장(선택)
+# clearvoice              # ClearerVoice-Studio(선택)
+
+# --- TTS (repo 별도 설치) ---
+# Qwen3-TTS / VoxCPM2 / Piper / MeloTTS 는 각 repo 클론 후 설치
+#   (로컬 가중치만 사용, 클라우드 API 금지 §2)
+
+# --- RAG / 메모리 ---
+faiss-cpu>=1.8            # GPU면 faiss-gpu
+sentence-transformers>=3.0   # EmbeddingGemma
+# chromadb>=0.5           # 선택(RAG는 faiss로 충분). 필요시 별도 설치
+# mem0ai
+
+# --- 실시간 ---
+# pipecat-ai
+# livekit-server-sdk
+
+# 참고: torchcodec DLL 경고(Windows)는 무해 — pyannote 가 메모리 파형 경로로 우회.
+#       Linux GPU 에선 보통 정상 동작.

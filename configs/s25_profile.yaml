@@ -1,0 +1,10 @@
+# S2.5 방언 자동 프로파일링 + 라벨링 (§11)
+dialect:
+  # 후보 지역. 제주는 데이터 없음 → 기본 제외(폴백만) (§11.1)
+  regions: [gyeongsang, jeolla, chungcheong, gangwon]
+  markers_dir: resources/dialect_markers
+  intensity:
+    method: marker_ratio        # marker_ratio | edit_distance | both
+  min_tokens: 50                # 추정 신뢰 최소 토큰 수
+profile:
+  n_sample_utterances: 8        # 라벨링 편집기에서 재생할 대표 발화 수

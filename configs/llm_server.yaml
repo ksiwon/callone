@@ -1,0 +1,13 @@
+# S5 서버 LLM (§15, 부록 B) — Gemma 4 12B LoRA
+# ※ §3 검증 의무: 고정 전 최신 Gemma/대체 웹 재확인 후 README 기록
+base_model: "google/gemma-4-12b-it"     # 최신본 재확인 후 확정
+method: "qlora"
+lora: {r: 16, alpha: 32, dropout: 0.05, target: "all-linear"}
+train: {epochs: 3, lr: 1.0e-4, bsz: 8, grad_accum: 4, max_seq_len: 4096}
+use_tau: true
+chat_template: "gemma4"
+output_dir: "models/llm_12b"
+generation:
+  temperature: 0.7             # 사실질문 temp↓ (환각 억제, §15.3)
+  top_p: 0.9
+  max_new_tokens: 256

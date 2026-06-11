@@ -1,0 +1,33 @@
+# callone 의존성 — 전부 무료 오픈소스 (§2, §6)
+# 결제형 API 패키지 금지: openai, elevenlabs, assemblyai 등 없음.
+# 무거운 ML 패키지는 [heavy] extra 로 분리 (pyproject.toml 참조).
+# 이 파일은 코어 + 파이프라인 최소 동작용.
+
+# --- 코어 ---
+pydantic>=2.5
+pyyaml>=6.0
+numpy>=1.24
+pandas>=2.0
+pyarrow>=14.0
+python-dotenv>=1.0
+cryptography>=42.0
+rich>=13.0
+typer>=0.9
+psutil>=5.9          # 기기 티어 감지(RAM/하드웨어)
+
+# --- 오디오 ---
+librosa>=0.10
+soundfile>=0.12
+# torch / torchaudio: 플랫폼별로 설치 (https://pytorch.org). heavy extra.
+
+# --- 서빙 API ---
+fastapi>=0.110
+uvicorn[standard]>=0.27
+websockets>=12.0
+
+# --- 테스트 ---
+pytest>=8.0
+
+# 무거운 의존성(GPU/대용량)은 별도 설치:
+#   pip install -e ".[heavy]"
+# 또는 requirements-heavy.txt 참조.

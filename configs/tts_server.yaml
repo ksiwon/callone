@@ -1,0 +1,16 @@
+# S4 서버 TTS (§14) — 고품질 파인튜닝
+# ※ §3 모델 검증 의무: 고정 전 최신본 웹 재확인 후 README 기록
+backend: qwen3-tts             # qwen3-tts | voxcpm2 | llasa-korean
+# ⚠️ Qwen3-TTS 는 로컬 가중치만. Alibaba 클라우드 보이스 API 호출 금지 (§2)
+model_id: "Qwen/Qwen3-TTS"     # 로컬 캐시 가중치
+sample_rate: 48000
+finetune:
+  method: lora
+  epochs: 50
+  lr: 1.0e-4
+  batch_size: 16
+streaming: true
+output_dir: "models/tts_server"
+eval:
+  secs_min: 0.70               # 화자 유사도 임계
+  self_wer_max: 0.10

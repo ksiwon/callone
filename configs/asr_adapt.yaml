@@ -1,0 +1,19 @@
+# ASR 방언 적응 (§13) — 정확도 핵심
+base_model: "openai/whisper-large-v3"
+correction_set:
+  hours: 3.0                    # 본인 통화 2~5h 수동 교정 샘플링
+  min_seg_sec: 3.0
+  max_seg_sec: 15.0
+  sample_strategy: diverse      # 화자/주제 다양성
+finetune:
+  method: lora                  # lora | full
+  lora: {r: 16, alpha: 32, dropout: 0.05}
+  epochs: 3
+  lr: 1.0e-4
+  batch_size: 8
+  grad_accum: 2
+# 보강(선택): AIHub 방언 + 저음질 통화 데이터로 부트스트랩
+aihub:
+  enabled: false
+  region_match: true            # S2.5 추정 지역에 맞춰 선택
+output_dir: "models/asr_dialect"

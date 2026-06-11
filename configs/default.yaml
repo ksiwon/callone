@@ -1,0 +1,22 @@
+# callone 전역 기본 설정 — 모든 스테이지에 병합됨 (io.load_config)
+project: callone
+language: ko
+device: cuda          # .env DEVICE 로 덮어쓰기 가능
+
+paths:
+  raw: data/raw
+  wav16k: data/wav16k
+  restored: data/restored
+  diarized: data/diarized
+  speakers: data/speakers
+  datasets: data/datasets
+  models: models
+  reports: reports
+
+# 파일럿 모드: 소량(50통) + 한 사람(A)으로 수직 관통 (§18)
+pilot:
+  enabled: true
+  n_calls: 50
+  speaker: A
+
+seed: 42

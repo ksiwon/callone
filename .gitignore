@@ -1,0 +1,59 @@
+# callone gitignore
+# ⚠️ gitignore 는 줄 끝 주석을 지원하지 않는다 — 주석은 항상 별도 줄.
+
+# === 데이터/모델: 절대 커밋 금지 (개인정보·대용량, §20) ===
+data/
+models/
+# OpenVINO 변환 모델
+models_ov/
+# llama.cpp GGUF (배포모델·중간물)
+models_gguf/
+# 병합용 fp16 base 다운로드(재다운 가능)
+models_base/
+# Piper 학습 데이터셋(prep_piper 로 재생성)
+piper_ds/
+# Piper 학습 onnx 스냅샷
+onnx_snaps/
+*.gguf
+*.onnx
+*.safetensors
+*.ckpt
+.hf_cache/
+db/callone.sqlite
+db/vectors/
+reports/
+*.m4a
+*.wav
+*.parquet
+*.sqlite
+
+# === 잡파일/아카이브 ===
+code.tar
+*.zip
+*.tar
+
+# === secrets ===
+.env
+*.key
+*.pem
+
+# === python ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# === node / ui ===
+ui/node_modules/
+ui/dist/
+ui/.vite/
+
+# === claude 로컬 설정 ===
+.claude/
+
+# === misc ===
+.DS_Store
+*.log

@@ -1,0 +1,28 @@
+# 노트북 실시간 통화(서빙) 의존성 — torch/OpenVINO 없는 경량 스택.
+# LLM은 별도 프로세스(llama-server, HTTP)라 여기엔 torch 불필요 → segfault 회피.
+#   pip install -r requirements-serve.txt
+#
+# 추가로 llama.cpp 바이너리(llama-server) 별도 설치: docs/3_노트북에서_통화.md 참조.
+
+# --- 서빙 API + WebSocket ---
+fastapi>=0.110
+uvicorn[standard]>=0.27
+websockets>=12.0
+pydantic>=2.5
+pyyaml>=6.0
+numpy>=1.24
+python-dotenv>=1.0
+
+# --- ASR (faster-whisper = ctranslate2, torch 아님) ---
+faster-whisper>=1.0
+
+# --- TTS (Piper, onnx 추론 — torch 불필요) ---
+piper-tts>=1.2
+
+# --- 오디오 입출력 ---
+soundfile>=0.12
+sounddevice>=0.4        # scripts/call_mic.py 마이크 통화
+
+# 참고:
+#  - LoRA→GGUF 변환(make_gguf.py)은 1회성이라 별도: pip install torch peft "transformers>=5.10"
+#  - Piper 음성 학습은 GPU에서: scripts/setup_piper_gpu.sh (이 파일과 무관)

@@ -1,0 +1,40 @@
+# S6/S7 실시간 서빙 (§16, §17)
+host: "0.0.0.0"
+port: 8000
+# 실행 티어: auto 면 하드웨어 감지(common/hardware.detect_tier).
+#   server_gpu(H100) | laptop_cpu(32GB 노트북·무GPU) | phone(온디바이스)
+# CALLONE_TIER 환경변수로 강제 가능.
+tier: auto
+mode: server                   # server(고품질) | phone(온디바이스) — tier 가 우선
+vad:
+  backend: energy              # energy(torch-free, OV 호환) | silero(torch, 별도 프로세스 권장)
+  end_silence_ms: 200
+asr:
+  stream: true
+  model_dir: "models/asr_dialect"     # 방언 적응본 있으면 자동 우선
+  model: "auto"                       # auto=티어별(GPU:turbo, CPU:small). 고정도 가능
+  # ⚠️ §3: turbo 가 현 시점 최선인지 착수 시 재확인(Voxtral/Canary 등)
+  beam_size: 1                        # greedy → 실시간 지연 최소
+llm:
+  # 노트북 온디바이스 백엔드 선택:
+  #   llama = llama-server(HTTP) Qwen3.5-4B+LoRA  ← qwen3_5 는 OV 변환 불가라 이게 유일
+  #   ov    = OpenVINO base Qwen3-4B(Arc, 변환 가능한 모델만)
+  #   auto  = llama 먼저 시도(서버 떠있으면), 없으면 ov → 폴백
+  backend: auto                # auto | llama | ov | vllm
+  base_url: "http://127.0.0.1:8080"   # llama-server 주소
+  config: llm_phone            # llm_server(서버) | llm_phone(노트북)
+  use_rag: false               # LoRA 가 말투 내재화 → 일상대화 RAG off 가 자연스러움(삼천포 방지)
+  temperature: 0.5             # 낮추면 덜 산만
+  max_new_tokens: 80           # 전화 턴 짧게(LoRA 가 길게 주절거리는 것 캡)
+tts:
+  backend: qwen3-tts
+  stream: true
+  first_chunk_target_ms: 300
+orchestration: pipecat         # Pipecat + LiveKit(WebRTC)
+latency_budget_ms: 1200        # 첫 음성 < 1.2s, 목표 0.8s
+rag:
+  enabled: true
+  vector_db: faiss             # faiss | chroma | qdrant | sqlite-vss
+  embedder: "google/embeddinggemma"
+memory:
+  backend: mem0                # mem0 | zep

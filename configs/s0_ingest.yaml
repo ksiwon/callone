@@ -1,0 +1,8 @@
+# S0 적재/정규화 (§8)
+input_glob: "data/raw/*.m4a"
+target_sr: 16000
+channels: 1
+loudnorm: "I=-23:LRA=7"
+highpass_hz: 40
+# 손상 파일은 status=error 로 격리
+skip_existing: true

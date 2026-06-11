@@ -1,0 +1,14 @@
+# ASR 전사 (§12, §13)
+# 용도 구분:
+#   - 오프라인 데이터셋 전사(여기): 정확도 우선 → large-v3 (또는 방언 적응본)
+#   - 실시간 통화 전사: 속도 우선 → serve.yaml 의 large-v3-turbo
+#   - 로컬 CPU 테스트: model 을 "small"/"base" 로 낮추면 빠름
+model: "auto"                   # auto=티어별(GPU:large-v3, CPU:small). 고정도 가능. 적응본 있으면 우선
+adapted_model_dir: "models/asr_dialect"
+language: "ko"
+compute_type: "float16"        # cpu 자동 int8 강등(resolve_device)
+beam_size: 5
+word_timestamps: true
+# 사투리 어형 보존: 표준어 교정 금지 (§12)
+preserve_dialect: true
+vad_filter: true

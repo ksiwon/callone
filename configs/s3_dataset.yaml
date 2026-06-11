@@ -1,0 +1,15 @@
+# S3 데이터셋 빌드 (§12)
+tts:
+  min_snr_db: 14
+  min_sec: 3.0
+  max_sec: 15.0
+  require_clean: true           # clean=true & overlap=false
+  target_hours: [5, 20]         # 정제 후 사람당 목표
+  text_normalize: true          # 숫자/기호 → 한글
+dialogue:
+  max_turn_gap_sec: 30          # 이 이상 벌어지면 새 대화로 분할
+  min_turns: 2
+  use_tau: false                # Think-Aloud 증강(선택)
+pii:
+  enabled: true                 # 학습셋 저장 시 강제 (§20)
+  mask_tokens: {name: "[NAME]", phone: "[PHONE]", addr: "[ADDR]", rrn: "[RRN]", account: "[ACCOUNT]"}
