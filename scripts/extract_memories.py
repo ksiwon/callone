@@ -28,23 +28,26 @@ from callone.common.logging import get_logger  # noqa: E402
 
 log = get_logger("extract_memories")
 
+# 페르소나(말투) 모델은 firm-only 프롬프트엔 빈배열을 자주 낸다 → few-shot + "최대한 많이"로
+# 적극 추출하게 유도(실측: 0개 → 20+개). 노이즈는 의미검색(rag) 단계가 걸러준다.
 _SYS = (
-    "너는 통화 기록에서 '화자에 대한 사실'만 추출하는 도구다. "
-    "추측·창작 절대 금지 — 발화에 명시되거나 강하게 함의된 것만. "
-    "각 사실은 짧고 독립적인 한국어 평서문(예: '경상도에 산다', '아들 건강을 걱정한다'). "
-    "민감해도 발화 근거가 있으면 포함. 출력은 **JSON 문자열 배열만**(설명·코드펜스 없이)."
+    "통화 발화에서 화자에 대해 알 수 있는 정보를 최대한 많이 뽑아 JSON 배열로 출력한다. "
+    "장소·가족·일정·건강·음식·감정·사건·관계·직업·취향·행동 등 사소해도 발화에 나오면 포함. "
+    "추측·창작은 금지(발화 근거가 있는 것만). 각 항목은 짧은 한국어 평서문. "
+    "설명·코드펜스 없이 JSON 문자열 배열만 출력."
 )
-_USR = (
-    "다음은 한 화자의 통화 발화 모음이다. 이 사람에 대한 사실"
-    "(거주·가족·건강·직업·취향·사건·관계·습관·일정 등)을 뽑아 JSON 배열로:\n\n{chunk}\n\nJSON 배열:"
+_FEWSHOT = (
+    "예시 입력:\n- 나 지금 김해 와 있다\n- 아들 밥은 챙겨 묵나\n- 어제 병원 갔다 왔다\n"
+    '예시 출력:\n["김해에 있다", "아들 끼니를 챙긴다", "어제 병원에 다녀왔다"]\n\n'
 )
+_USR = _FEWSHOT + "실제 입력:\n{chunk}\n\n출력:"
 
 
 def _chat(base_url: str, sys_p: str, usr_p: str, timeout: float = 120) -> str:
     payload = {
         "messages": [{"role": "system", "content": sys_p},
                      {"role": "user", "content": usr_p}],
-        "max_tokens": 700, "temperature": 0.2,
+        "max_tokens": 700, "temperature": 0.3,
         "chat_template_kwargs": {"enable_thinking": False},
     }
     req = urllib.request.Request(
@@ -93,7 +96,7 @@ def main():
     ap = argparse.ArgumentParser(description="화자 사실(기억) 추출")
     ap.add_argument("--speaker", default="A")
     ap.add_argument("--base-url", default="http://127.0.0.1:8080")
-    ap.add_argument("--chunk", type=int, default=30, help="청크당 발화 수")
+    ap.add_argument("--chunk", type=int, default=60, help="청크당 발화 수")
     ap.add_argument("--max-chunks", type=int, default=0, help="0=전체")
     args = ap.parse_args()
 
@@ -107,7 +110,15 @@ def main():
         chunks = chunks[:args.max_chunks]
     log.info("화자 %s: 발화 %d개 → 청크 %d개 추출 시작", args.speaker, len(texts), len(chunks))
 
+    out = data_dir() / "speakers" / args.speaker / "memories.json"
+    # 이어하기: 기존 memories.json 있으면 누적(중복은 _dedup 가 정리)
     facts: list[str] = []
+    if out.exists():
+        try:
+            facts = [x for x in read_json(out) if isinstance(x, str)]
+            log.info("기존 %d개에서 이어서 추가", len(facts))
+        except Exception:  # noqa: BLE001
+            pass
     for i, ch in enumerate(chunks, 1):
         body = "\n".join(f"- {t}" for t in ch)
         try:
@@ -115,11 +126,11 @@ def main():
             facts.extend(got)
         except Exception as e:  # noqa: BLE001
             log.warning("청크 %d 실패(%s)", i, e)
-        if i % 10 == 0:
-            log.info("  %d/%d 청크, 누적 사실 %d", i, len(chunks), len(facts))
+        if i % 5 == 0:                       # 5청크마다 중간 저장(끊겨도 보존)
+            write_json(out, _dedup(facts))
+            log.info("  %d/%d 청크, 누적 사실 %d (저장됨)", i, len(chunks), len(_dedup(facts)))
 
     facts = _dedup(facts)
-    out = data_dir() / "speakers" / args.speaker / "memories.json"
     write_json(out, facts)
     log.info("완료: 사실 %d개 → %s", len(facts), out)
     # 임베딩 캐시는 rag.py 가 첫 로드 때 생성
