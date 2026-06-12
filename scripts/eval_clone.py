@@ -49,10 +49,14 @@ def main():
     ap.add_argument("--base-url", default="http://127.0.0.1:8080")
     args = ap.parse_args()
 
+    from callone.common.io import load_config
     from callone.serve.llama_llm import LlamaPersonaLLM
 
+    c = load_config("serve").get("llm", {})       # 실제 배포 설정으로 검증
     m = LlamaPersonaLLM(args.speaker, base_url=args.base_url, use_rag=True,
-                        max_new_tokens=80, temperature=0.5)
+                        max_new_tokens=int(c.get("max_new_tokens", 64)),
+                        temperature=float(c.get("temperature", 0.4)),
+                        rag_cfg=c)
     print(f"=== 클론 검증: 화자 {args.speaker} (use_rag=ON, 게이트 회상) ===\n")
     for kind, q in CASES:
         mem = m._rag.context(q, k=3) if m._rag else ""    # 게이트 통과한 기억(없으면 빈값)
