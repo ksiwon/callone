@@ -28,6 +28,9 @@ class UtteranceRAG:
         self.cfg = cfg or {}
         self.use_vectors = use_vectors and not (cfg or {}).get("keyword_only", False)
         self.model_name = (cfg or {}).get("embedder", _EMBED_MODEL)
+        # 게이트 회상: 유사도 이 값 미만이면 '관련 기억 없음'으로 간주 → 주입 안 함(평소처럼 대화).
+        # e5 정규화 코사인 기준 0.80 근방이 적당(질문과 무관한 잡사실 차단). cfg 로 조정.
+        self.min_score = float((cfg or {}).get("rag_min_score", 0.80))
         self.kind = "memories"          # memories | utterances
         self.texts: list[str] = []
         self._emb: np.ndarray | None = None
@@ -103,7 +106,7 @@ class UtteranceRAG:
             self._emb = None
             self.use_vectors = False
 
-    # ----- 검색 -----------------------------------------------------------
+    # ----- 검색(게이트: 임계값 넘는 것만) ---------------------------------
     def search(self, query: str, k: int = 3) -> list[str]:
         if not self.texts:
             return []
@@ -112,11 +115,14 @@ class UtteranceRAG:
                 q = self._embed([query], is_query=True)[0]
                 sims = self._emb @ q
                 idx = np.argsort(-sims)[:k]
-                return [self.texts[i] for i in idx]
+                # 임계값 넘는 관련 기억만 (없으면 빈 리스트 → 주입 안 함)
+                return [self.texts[i] for i in idx if sims[i] >= self.min_score]
             except Exception as e:  # noqa: BLE001
                 log.warning("의미검색 오류(%s) — 키워드", e)
+        # 키워드 폴백: 겹치는 토큰이 있어야 관련으로 간주(무관하면 빈 리스트)
         toks = set(query.split())
-        return sorted(self.texts, key=lambda t: -len(toks & set(t.split())))[:k]
+        scored = [(t, len(toks & set(t.split()))) for t in self.texts]
+        return [t for t, s in sorted(scored, key=lambda x: -x[1])[:k] if s > 0]
 
     def context(self, query: str, k: int = 3) -> str:
         hits = self.search(query, k)

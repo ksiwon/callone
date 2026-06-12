@@ -75,8 +75,9 @@ class LlamaPersonaLLM:
         if self._rag:
             try:
                 ctx = self._rag.context(user_text, k=3)
-                if ctx:
-                    sys += f"\n\n[이 사람에 대해 기억하는 것]\n{ctx}"
+                if ctx:   # 게이트(rag): 관련 기억 있을 때만 채워짐 → 평소엔 빈 값이라 주입 안 됨
+                    sys += ("\n\n[참고할 기억 — 지금 질문과 자연스럽게 이어질 때만 활용하고, "
+                            "관련 없으면 무시하고 평소처럼 대화한다]\n" + ctx)
             except Exception:  # noqa: BLE001
                 pass
         sys += "\n전화 통화처럼 1~2문장으로 짧고 자연스럽게 답한다."
