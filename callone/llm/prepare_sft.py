@@ -26,14 +26,15 @@ _DONTKNOW = [
 ]
 
 
-def to_chat_text(messages: list[dict], template: str = "gemma4") -> dict:
+def to_chat_text(messages: list[dict], template: str = "qwen3.5") -> dict:
     """채팅 메시지 → 학습용 dict. 실제 토크나이즈는 train_lora 에서 apply_chat_template."""
     return {"messages": messages}
 
 
 def run(cfg: dict, speakers: list[str]) -> None:
     add_dk = cfg.get("use_tau", True)  # 캘리브레이션도 함께
-    template = cfg.get("chat_template", "gemma4")
+    # 결정서 §1: Qwen3.5 채택 → 기본 템플릿 qwen3.5(ChatML).
+    template = cfg.get("chat_template", "qwen3.5")
     for spk in speakers:
         src = data_dir() / "datasets" / spk / "dialogue" / "train.jsonl"
         if not src.exists():

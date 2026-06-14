@@ -1,15 +1,30 @@
-# S4 서버 TTS (§14) — 고품질 파인튜닝
-# ※ §3 모델 검증 의무: 고정 전 최신본 웹 재확인 후 README 기록
+# S4 서버 TTS (§14) — callone_stack_decision.md(2026-06-14) §2 적용
+# 기존 CosyVoice3 폐기 → Qwen3-TTS 1.7B (zero-shot + 감정 instruct 단일모델 통합).
+# ※ §3 검증 의무: 고정 전 최신본 웹 재확인 후 README 기록.
+# ⚠️ 로컬 가중치만. Alibaba 클라우드 보이스 API 호출 금지 (§2).
 backend: qwen3-tts             # qwen3-tts | voxcpm2 | llasa-korean
-# ⚠️ Qwen3-TTS 는 로컬 가중치만. Alibaba 클라우드 보이스 API 호출 금지 (§2)
-model_id: "Qwen/Qwen3-TTS"     # 로컬 캐시 가중치
-sample_rate: 48000
+model_id: "Qwen/Qwen3-TTS-12Hz-1.7B-Base"   # 파인튜닝 베이스(제로샷만이면 -Instruct)
+runtime: faster-qwen3-tts      # faster_qwen3_tts.QwenTTS (스트리밍 TTFA 97~159ms)
+sample_rate: 24000             # ⚠️ Qwen3-TTS 24kHz 강제 — 학습/추론 전 전부 리샘플
 finetune:
   method: lora
-  epochs: 50
-  lr: 1.0e-4
-  batch_size: 16
+  epochs: 10
+  lr: 2.0e-6                    # ⚠️ §2-4: 기본값 2e-5 금지 — 2e-6 고정
+  lora_r: 16
+  lora_alpha: 32
+  batch_size: 4
+  # 학습 전 체크: 24kHz 리샘플 / annotation 태그 제거 / 클립끝 1초 묵음 / commit 680d4e9+ / PR#178
+inference:
+  lora_scale: 0.3              # 0.2/0.3/0.35/0.5 스윕 후 최적값
+  chunk_size: 8                # TTFA ~159ms
 streaming: true
+# 감정 instruct 매핑(orchestrator 가 LLM emotion 키로 주입) — tts_qwen.EMOTION_MAP 와 동일 의미
+emotion_instruct:
+  happy:   "Speak with a bright, cheerful, and warm tone."
+  sad:     "Speak with a low, slow, comforting, and sad tone."
+  angry:   "Speak with an annoyed, sharp, and frustrated voice."
+  neutral: "Speak in a natural, relaxed, conversational tone."
+  excited: "Speak with high energy and an excited, upbeat tone."
 output_dir: "models/tts_server"
 eval:
   secs_min: 0.70               # 화자 유사도 임계

@@ -18,8 +18,14 @@ def load_persona(speaker: str) -> str:
 
 
 def build_messages(speaker: str, user_text: str, history: list[dict] | None = None,
-                   rag_context: str | None = None, memory: str | None = None) -> list[dict]:
-    system = load_persona(speaker)
+                   rag_context: str | None = None, memory: str | None = None,
+                   persona_override: str | None = None,
+                   situation: str | None = None) -> list[dict]:
+    # persona_override: 통화 시 사용자가 직접 지정한 "이 사람은 누구인가"(학습 페르소나 대체).
+    system = persona_override.strip() if (persona_override and persona_override.strip()) \
+        else load_persona(speaker)
+    if situation and situation.strip():
+        system += f"\n\n[지금 통화 상황 — 이 맥락에서 대화한다]\n{situation.strip()}"
     if rag_context:
         system += f"\n\n[참고할 실제 발화 기억]\n{rag_context}"
     if memory:

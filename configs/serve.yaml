@@ -16,24 +16,32 @@ asr:
   # ⚠️ §3: turbo 가 현 시점 최선인지 착수 시 재확인(Voxtral/Canary 등)
   beam_size: 1                        # greedy → 실시간 지연 최소
 llm:
-  # 노트북 온디바이스 백엔드 선택:
-  #   llama = llama-server(HTTP) Qwen3.5-4B+LoRA  ← qwen3_5 는 OV 변환 불가라 이게 유일
+  # 백엔드 선택 (callone_stack_decision.md §3: llama.cpp 채택):
+  #   llama = llama-server(HTTP, OpenAI 호환) Qwen3.5-9B(서버) / 4B(노트북) + LoRA
   #   ov    = OpenVINO base Qwen3-4B(Arc, 변환 가능한 모델만)
   #   auto  = llama 먼저 시도(서버 떠있으면), 없으면 ov → 폴백
   backend: auto                # auto | llama | ov | vllm
-  base_url: "http://127.0.0.1:8080"   # llama-server 주소
-  config: llm_phone            # llm_server(서버) | llm_phone(노트북)
+  base_url: "http://127.0.0.1:8080"   # llama-server 주소(RunPod 결정서는 8001 — 환경맞춰)
+  config: llm_phone            # llm_server(서버 Qwen3.5-9B) | llm_phone(노트북 4B)
+  enable_thinking: false       # §1-3: 대화용 thinking 비활성(응답 지연 억제)
   # 기억 회상: extract_memories.py 로 memories.json 만든 뒤 true 권장(의미검색=삼천포 없음).
-  # memories.json 없으면 날것 발화 폴백이라 산만 → 그땐 false 유지.
   use_rag: false               # 사실 추출 후 true 로
   embedder: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # fastembed 지원본(한국어 OK)
   rag_min_score: 0.45          # 게이트(MiniLM 기준): 미만이면 기억 안 씀. 허위회상 잦으면 ↑, 회상 약하면 ↓
   temperature: 0.4             # 낮추면 덜 산만(횡설수설 억제)
+  top_p: 0.8
+  top_k: 20
   max_new_tokens: 64           # 전화 턴 짧게(LoRA 가 길게 주절거리는 것 캡)
 tts:
-  backend: qwen3-tts
+  backend: qwen3-tts           # §2: Qwen3-TTS 1.7B(감정 instruct 통합). 미설치 시 piper/kokoro 폴백
   stream: true
-  first_chunk_target_ms: 300
+  first_chunk_target_ms: 159   # §2: chunk_size=8 → TTFA ~97~159ms
+  lora_scale: 0.3              # 화자 LoRA 적용 강도(tts_server.yaml 과 동일)
+  chunk_size: 8
+  emotion: true                # LLM emotion 키 → instruct 동적 주입
+  # 제로샷 참조(학습본 없을 때): 화자 참조 WAV/전사(7~10초, 24kHz, 잡음 없음)
+  ref_wav: ""                  # 예: data/speakers/A/ref_24k.wav
+  ref_text: ""                 # 참조 WAV 의 실제 발화 텍스트(정확히 일치)
 orchestration: pipecat         # Pipecat + LiveKit(WebRTC)
 latency_budget_ms: 1200        # 첫 음성 < 1.2s, 목표 0.8s
 rag:

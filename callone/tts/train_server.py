@@ -52,14 +52,15 @@ def _print_recipe(spk: str, csv: Path, cfg: dict, backend: str) -> None:
     out = Path(cfg.get("output_dir", "models/tts_server")) / spk
     ft = cfg.get("finetune", {})
     log.info(
-        "[%s 학습 레시피 spk=%s]\n"
-        "  데이터: %s (LJSpeech 포맷, 48k 복원본)\n"
-        "  방법: LoRA, epochs=%s lr=%s bsz=%s, sample_rate=%s\n"
-        "  출력: %s\n"
-        "  → H100 노드에서 %s repo 의 finetune 스크립트로 실행. "
-        "config 의 model_id 는 로컬 가중치 경로. 클라우드 API 금지.",
-        backend, spk, csv, ft.get("epochs"), ft.get("lr"), ft.get("batch_size"),
-        cfg.get("sample_rate"), out, backend,
+        "[%s 학습 레시피 spk=%s] (callone_stack_decision §2-4)\n"
+        "  데이터: %s — ⚠️ 반드시 %sHz 리샘플(미리샘플 시 학습 크래시)\n"
+        "  방법: LoRA r=%s alpha=%s, epochs=%s, lr=%s (⚠️ 2e-5 금지, 2e-6 고정), bsz=%s\n"
+        "  사전: annotation 태그 제거 / 각 클립 끝 1초 묵음 / commit 680d4e9+ / PR#178 확인\n"
+        "  출력: %s  · 추론 lora_scale=%s (0.2/0.3/0.35/0.5 스윕)\n"
+        "  → A100 에서 QwenLM/Qwen3-TTS sft_12hz.py. model_id=로컬 가중치. 클라우드 API 금지(§2).",
+        backend, spk, csv, cfg.get("sample_rate"),
+        ft.get("lora_r"), ft.get("lora_alpha"), ft.get("epochs"), ft.get("lr"),
+        ft.get("batch_size"), out, cfg.get("inference", {}).get("lora_scale"),
     )
 
 

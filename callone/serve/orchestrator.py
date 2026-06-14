@@ -11,6 +11,8 @@ TTS: KokoroTTS(화자 A 음색) → 없으면 placeholder.
 """
 from __future__ import annotations
 
+import json
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -88,7 +90,16 @@ def _pick_llm(speaker: str, serve_cfg: dict):
 
 def _pick_tts(speaker: str, serve_cfg: dict):
     tts_cfg = (serve_cfg or {}).get("tts", {})
-    # 1) Piper(화자 A 음색 학습본, onnx torch-free) 우선
+    backend = tts_cfg.get("backend", "qwen3-tts")
+    # 0) Qwen3-TTS(서버 GPU, 감정 instruct 통합) — 결정서 §2. backend=qwen3-tts 일 때만.
+    if backend == "qwen3-tts":
+        try:
+            from .tts_qwen import QwenTTS
+
+            return QwenTTS(speaker, tts_cfg)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Qwen3-TTS 불가(%s) — Piper 시도", e)
+    # 1) Piper(화자 A 음색 학습본, onnx torch-free)
     try:
         from .tts_piper import PiperTTS
 
@@ -107,6 +118,40 @@ def _pick_tts(speaker: str, serve_cfg: dict):
         return StreamTTS(speaker)
 
 
+_EMOTIONS = ("happy", "sad", "angry", "neutral", "excited")
+
+
+def _parse_emotion(text: str, default: str = "neutral") -> tuple[str, str]:
+    """LLM 출력에서 감정 키 추출 (§4-1). 반환 (emotion, 정제텍스트).
+
+    지원 형태:
+      - JSON: {"emotion":"sad","reply":"어이구..."}
+      - 태그: [emotion:happy] 안녕  /  (sad) 안녕
+      - 없으면 (default, 원문)
+    """
+    s = text.strip()
+    if s.startswith("{") and '"reply"' in s:
+        try:
+            obj = json.loads(s)
+            emo = str(obj.get("emotion", default)).lower()
+            return (emo if emo in _EMOTIONS else default), str(obj.get("reply", "")).strip()
+        except json.JSONDecodeError:
+            pass
+    m = re.match(r"^\s*[\[(]\s*(?:emotion\s*[:=]\s*)?(happy|sad|angry|neutral|excited)\s*[\])]\s*",
+                 s, re.IGNORECASE)
+    if m:
+        return m.group(1).lower(), s[m.end():].strip()
+    return default, s
+
+
+def _tts_stream_emo(tts, text: str, emotion: str):
+    """TTS 백엔드가 emotion 인자를 지원하면 넘기고, 아니면 무시(폴백 호환)."""
+    try:
+        yield from tts.synth_stream(text, emotion=emotion)
+    except TypeError:
+        yield from tts.synth_stream(text)
+
+
 class Orchestrator:
     def __init__(self, speaker: str, serve_cfg: dict | None = None):
         cfg = serve_cfg or load_config("serve")
@@ -122,6 +167,23 @@ class Orchestrator:
         """barge-in: 진행 중인 응답 중단 (app 이 마이크에서 사용자 발화 감지 시 호출)."""
         self._interrupt.set()
 
+    def set_context(self, persona: str | None = None, situation: str | None = None):
+        """통화 페르소나/상황 주입 — 매 통화 시작 시 호출.
+
+        persona:   이 사람이 누구인지(말투/성격/관계). 비면 학습된 페르소나 유지.
+        situation: 지금 어떤 상황에서 통화 중인지(배경지식/맥락).
+        LLM 백엔드가 set_context 를 지원하면 그대로 전달.
+        """
+        fn = getattr(self.llm, "set_context", None)
+        if callable(fn):
+            fn(persona=persona, situation=situation)
+        else:
+            log.warning("LLM 백엔드가 set_context 미지원 — 페르소나/상황 무시")
+
+    def reset_history(self):
+        """새 통화 시작 — 대화 이력 초기화."""
+        self.history = []
+
     def handle_utterance(self, audio: np.ndarray, sr: int = 16000) -> Turn:
         """완결된 발화 → 응답 텍스트 + 음성 청크 (문장 스트리밍, barge-in 존중)."""
         self._interrupt.clear()
@@ -132,13 +194,17 @@ class Orchestrator:
             return turn
 
         first = False
+        emotion = "neutral"
         parts = []
         for sentence in self.llm.chat_stream(user_text, self.history):
             if self._interrupt.is_set():
                 turn.interrupted = True
                 break
-            parts.append(sentence)
-            for chunk in self.tts.synth_stream(sentence):
+            emotion, clean = _parse_emotion(sentence, emotion)   # §4-1 감정 추출
+            if not clean:
+                continue
+            parts.append(clean)
+            for chunk in _tts_stream_emo(self.tts, clean, emotion):
                 if self._interrupt.is_set():
                     turn.interrupted = True
                     break
@@ -174,13 +240,18 @@ class Orchestrator:
             yield ("end", "")
             return
         first = False
+        emotion = "neutral"
         parts: list[str] = []
         for sentence in self.llm.chat_stream(user_text, self.history):
             if self._interrupt.is_set():
                 yield ("interrupted", None); break
-            parts.append(sentence)
-            yield ("text", sentence)
-            for chunk in self.tts.synth_stream(sentence):
+            emotion, clean = _parse_emotion(sentence, emotion)   # §4-1 감정 추출
+            if not clean:
+                continue
+            parts.append(clean)
+            yield ("emotion", emotion)
+            yield ("text", clean)
+            for chunk in _tts_stream_emo(self.tts, clean, emotion):
                 if self._interrupt.is_set():
                     yield ("interrupted", None); break
                 if not first:

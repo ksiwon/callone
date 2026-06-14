@@ -1,8 +1,8 @@
-"""S5 Gemma 4 LoRA/QLoRA 파인튜닝 (§15.2).
+"""S5 Qwen3.5 LoRA/QLoRA 파인튜닝 (§15.2, callone_stack_decision §1).
 
-같은 SFT 데이터로 12B(서버)·E4B(폰) LoRA 각각.
-→ models/llm_12b/{spk}, models/llm_e4b/{spk}.
-Gemma 4 채팅 템플릿 사용. HF+QLoRA 또는 Unsloth.
+같은 SFT 데이터로 9B(서버, uncensored/abliterated)·4B(노트북) LoRA 각각.
+→ models/llm_server/{spk}, models/llm_phone/{spk}.
+Qwen3.5 채팅 템플릿(ChatML, enable_thinking=False). HF+QLoRA 또는 Unsloth.
 
 무거운 의존성(transformers/peft/bitsandbytes) — H100. 미설치 시 레시피 안내.
 
@@ -50,23 +50,31 @@ def train(cfg: dict, spk: str) -> None:
         return
 
     base = cfg.get("base_model")
-    out = Path(cfg.get("output_dir", "models/llm_12b")) / spk
+    out = Path(cfg.get("output_dir", "models/llm_server")) / spk
     tcfg = cfg.get("train", {})
     lcfg = cfg.get("lora", {})
 
-    bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
-                             bnb_4bit_compute_dtype="bfloat16")
+    # ⚠️ Qwen3.5 = MoE. Unsloth(2026) 권장: bf16 LoRA(load_in_4bit=false).
+    #    bitsandbytes 의 MoE 4bit 임포트 버그 회피. VRAM 빠듯할 때만 4bit.
+    use_4bit = bool(cfg.get("load_in_4bit", cfg.get("method") == "qlora"))
     tok = AutoTokenizer.from_pretrained(base)
-    model = AutoModelForCausalLM.from_pretrained(base, quantization_config=bnb,
-                                                 device_map="auto")
+    if use_4bit:
+        bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                                 bnb_4bit_compute_dtype="bfloat16")
+        model = AutoModelForCausalLM.from_pretrained(base, quantization_config=bnb,
+                                                     device_map="auto")
+    else:
+        model = AutoModelForCausalLM.from_pretrained(base, torch_dtype="bfloat16",
+                                                     device_map="auto")
     model.config.use_cache = False          # gradient checkpointing 과 호환
-    try:                                    # 4bit 학습 준비(grad checkpointing 등)
-        from peft import prepare_model_for_kbit_training  # type: ignore
+    if use_4bit:
+        try:                                # 4bit 학습 준비(grad checkpointing 등)
+            from peft import prepare_model_for_kbit_training  # type: ignore
 
-        model = prepare_model_for_kbit_training(
-            model, use_gradient_checkpointing=True)
-    except Exception:  # noqa: BLE001
-        pass
+            model = prepare_model_for_kbit_training(
+                model, use_gradient_checkpointing=True)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _reshape(messages):
         """Qwen 등 채팅 템플릿이 받화자 B이는 형태로 정규화.
@@ -108,8 +116,16 @@ def train(cfg: dict, spk: str) -> None:
         return
     data = recs
 
+    # 결정서 §1-3: Qwen3.5 는 thinking 비활성으로 학습(대화용, 지연 억제).
+    enable_thinking = bool(cfg.get("enable_thinking", False))
+
     def fmt(ex):
-        return {"text": tok.apply_chat_template(ex["messages"], tokenize=False)}
+        try:
+            text = tok.apply_chat_template(ex["messages"], tokenize=False,
+                                           enable_thinking=enable_thinking)
+        except TypeError:   # 템플릿이 enable_thinking 미지원(Gemma 등) → 무시
+            text = tok.apply_chat_template(ex["messages"], tokenize=False)
+        return {"text": text}
 
     ds = Dataset.from_list(data).map(fmt)
     peft_cfg = LoraConfig(r=lcfg.get("r", 16), lora_alpha=lcfg.get("alpha", 32),
@@ -147,19 +163,20 @@ def train(cfg: dict, spk: str) -> None:
 
 def _print_recipe(cfg: dict, spk: str) -> None:
     log.info(
-        "[Gemma4 QLoRA 레시피 spk=%s]\n"
+        "[Qwen3.5 QLoRA 레시피 spk=%s] (callone_stack_decision §1)\n"
         "  base=%s method=%s\n"
         "  lora=%s train=%s\n"
         "  데이터: data/datasets/%s/dialogue/sft.jsonl\n"
-        "  → H100 노드에서 trl SFTTrainer + apply_chat_template('gemma4').\n"
-        "  ※ §3: base_model 최신 Gemma 버전 웹 재확인 후 README 기록.",
+        "  → A100 에서 Unsloth/trl QLoRA + apply_chat_template(enable_thinking=False).\n"
+        "  → 학습 후 GGUF q4_k_m 변환(scripts/make_gguf.py) → llama-server.\n"
+        "  ※ 서빙은 aggressive uncensored GGUF(serve_gguf_repo) 직접도 가능.",
         spk, cfg.get("base_model"), cfg.get("method"),
         cfg.get("lora"), cfg.get("train"), spk,
     )
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="S5 Gemma4 LoRA 파인튜닝")
+    ap = argparse.ArgumentParser(description="S5 Qwen3.5 LoRA 파인튜닝")
     ap.add_argument("--config", default="llm_server", help="llm_server | llm_phone")
     ap.add_argument("--speakers", nargs="+", default=["A"])
     args = ap.parse_args()

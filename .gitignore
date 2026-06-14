@@ -26,6 +26,16 @@ reports/
 *.wav
 *.parquet
 *.sqlite
+# CosyVoice/OpenVoice 참조 오디오(데이터)
+cosyvoice_ref/
+
+# === voice_clone (벤더드 제로샷 앱) — 앱 코드만 커밋, 산출물/대용량 제외 ===
+# 저장된 음성 프로필(사용자 데이터)
+voice_clone/voices/
+# 다운로드 가중치(setup.sh 로 재취득)
+voice_clone/**/pretrained_models/
+# 원본 백업 사본
+voice_clone/**/_backup*/
 
 # === 잡파일/아카이브 ===
 code.tar

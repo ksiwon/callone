@@ -101,8 +101,9 @@ def to_gguf(merged_dir: Path, llama_cpp: Path, out_dir: Path, speaker: str, quan
 def main():
     ap = argparse.ArgumentParser(description="LoRA 병합 → GGUF 변환")
     ap.add_argument("--speaker", default="A")
-    ap.add_argument("--config", default="llm_phone")
-    ap.add_argument("--base", default=None, help="기본: configs/llm_phone.yaml base_model")
+    ap.add_argument("--config", default="llm_server",
+                    help="llm_server(9B 서버) | llm_phone(4B 노트북)")
+    ap.add_argument("--base", default=None, help="기본: config 의 base_model")
     ap.add_argument("--llama-cpp", required=True, help="llama.cpp 저장소 경로(convert/quantize)")
     ap.add_argument("--out", default="models_gguf")
     ap.add_argument("--quant", default="Q4_K_M", help="Q4_K_M | Q5_K_M | Q8_0 | f16")

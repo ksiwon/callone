@@ -25,25 +25,40 @@ class TTSEngine:
     def __init__(self, speaker: str, cfg: dict):
         self.speaker = speaker
         self.cfg = cfg
-        self.sr = int(cfg.get("sample_rate", 48000))
         self.backend = cfg.get("backend", "qwen3-tts")
+        # 결정서 §2: Qwen3-TTS 24kHz. config 의 sample_rate 우선.
+        self.sr = int(cfg.get("sample_rate", 24000))
         self.model_dir = Path(cfg.get("output_dir", "models/tts_server")) / speaker
+        self._engine = None          # 실백엔드(QwenTTS 등)
         self._loaded = self._try_load()
 
     def _try_load(self) -> bool:
-        if not self.model_dir.exists():
+        # 결정서 §2: qwen3-tts 백엔드면 faster_qwen3_tts(QwenTTS) 시도.
+        if self.backend == "qwen3-tts":
+            try:
+                from ..serve.tts_qwen import QwenTTS
+
+                self._engine = QwenTTS(self.speaker)
+                self.sr = self._engine.sr
+                log.info("TTSEngine: Qwen3-TTS 백엔드 로드(speaker=%s)", self.speaker)
+                return True
+            except Exception as e:  # noqa: BLE001
+                log.warning("Qwen3-TTS 미연결(%s) — placeholder 합성", e)
+        elif not self.model_dir.exists():
             log.warning("TTS 모델 없음 %s — placeholder 합성 사용", self.model_dir)
-            return False
-        # 실제 백엔드 로더 연결 지점 (qwen3/voxcpm/piper/melotts)
         return False
 
-    def synth(self, text: str) -> tuple[np.ndarray, int]:
-        if self._loaded:
-            raise NotImplementedError("백엔드 합성 연결 지점")
+    def synth(self, text: str, emotion: str | None = None) -> tuple[np.ndarray, int]:
+        if self._loaded and self._engine is not None:
+            return self._engine.synth(text, emotion=emotion)
         return self._placeholder(text), self.sr
 
-    def synth_stream(self, text: str, chunk_ms: int = 200) -> Iterator[np.ndarray]:
+    def synth_stream(self, text: str, chunk_ms: int = 200,
+                     emotion: str | None = None) -> Iterator[np.ndarray]:
         """문장단위 → 청크 스트리밍 (S6 지연 예산)."""
+        if self._loaded and self._engine is not None:
+            yield from self._engine.synth_stream(text, chunk_ms=chunk_ms, emotion=emotion)
+            return
         y, sr = self.synth(text)
         step = int(sr * chunk_ms / 1000)
         for i in range(0, len(y), step):

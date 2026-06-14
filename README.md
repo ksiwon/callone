@@ -8,6 +8,7 @@
 > ⚠️ **윤리 고지:** 결과물은 그 사람 *그대로*가 아니라 **근사(近似)** 다.
 > 사칭·기만 금지. 사적/추모/연구 목적에 한정. 통화 녹음·개인정보 관련 관할 법규를 준수하라.
 
+## 🚀 통합 앱 → [`studio/`](studio/README.md) · 서버 배포·실행 → [`DEPLOY.md`](DEPLOY.md)
 ## 📖 사용 가이드 → [`docs/`](docs/README.md)
 1. [로컬에서 학습](docs/1_로컬에서_학습.md) · 2. [GPU에서 학습](docs/2_GPU에서_학습.md) · 3. [노트북에서 통화](docs/3_노트북에서_통화.md) · 4. [휴대폰에서 통화](docs/4_휴대폰에서_통화.md)
 
@@ -67,6 +68,10 @@ cd ui && npm install && npm run dev   # :5173
 
 ## Model Decisions (§3 — 최신성 검증 의무 기록)
 
+> ⚠️ **2026-06-14 갱신:** LLM/TTS/서빙은 [`callone_stack_decision.md`](callone_stack_decision.md) 가
+> 우선한다 — Gemma 4 12B→**Qwen3.5-9B(uncensored/aggressive)**, CosyVoice3→**Qwen3-TTS 1.7B**,
+> vLLM→**llama.cpp(llama-server)**. 아래 표의 해당 행은 그 문서 기준으로 읽을 것.
+>
 > 이 분야는 주 단위로 바뀐다. 아래는 **2026-06-08 기준 baseline**(스펙 §3 표)을 채택한 것.
 > **각 모델을 코드에 고정하기 전, 해당 스테이지 착수 시 웹으로 최신본을 재확인하고 이 표를 갱신할 것.**
 > 설정값은 모두 `configs/*.yaml` 로 파라미터화되어 있어 교체가 쉽다.
@@ -75,7 +80,7 @@ cd ui && npm install && npm run dev   # :5173
 
 | 구성요소 | 채택 | config 키 | 검증 | 근거(2026-06) |
 |---|---|---|---|---|
-| 두뇌 LLM (GPU 서버) | **Gemma 4 12B** (네이티브 오디오) | `llm_server.base_model` | ✅ 2026-06-08 | 16GB 통합메모리, 12B Unified 2026-06-03 출시 |
+| 두뇌 LLM (GPU 서버) | **Qwen3.5-9B** (uncensored/aggressive, GGUF) | `llm_server.serve_gguf_repo` | ✅ 2026-06-14 **변경** | 한국어 우위·llama.cpp ~126 tok/s. Gemma4 12B 폐기(stack_decision §1) |
 | 두뇌 LLM (노트북 온디바이스) | **Qwen 3.5-4B + LoRA** (llama.cpp GGUF Q4, Arc iGPU) | `serve.llm.backend=llama` | ✅ 2026-06-11 **실측** | 갤럭시북5 Pro(Arc 140V) Vulkan **~20 tok/s 실시간**. ⚠️ **OpenVINO는 qwen3_5 변환 불가**(아키텍처 GDN+MoE+MTP, optimum-intel #1628) → **llama.cpp 로 전환**. llama-server 별프로세스+HTTP라 torch/OV segfault 회피 |
 | 두뇌 LLM (노트북) | Gemma 4 E4B (+QAT) | (티어 자동) | ✅ 2026-06-08 | CPU 2~5 tok/s. 노트북엔 E4B |
 | ASR (오프라인+방언적응) | **Whisper large-v3 + LoRA** | `asr.model` | ✅ 2026-06-08 | 사투리 적응(§13)이 Whisper-LoRA 기반. 정확도 우선 |
@@ -84,11 +89,11 @@ cd ui && npm install && npm run dev   # :5173
 | 화자 분리 | **pyannote community-1** (4.0) | `s2_diarize.diarizer` | ✅ 2026-06-08 **변경** | 2026-02 출시, **3.1보다 우수**(잡음 통화 강함), 무료 CC-BY-4.0. `precision-2`(유료) **금지** |
 | 화자 임베딩 | ECAPA-TDNN (SpeechBrain) | `s2_diarize.embedding` | ✅ | WeSpeaker 대안 |
 | 음질 복원 | DeepFilterNet / Resemble Enhance | `s1_restore.*` | ✅ | 오픈 |
-| TTS 서버 | **Qwen3-TTS**(한국어·스트리밍, 2026-01) / **VoxCPM2**(48k·LoRA 5~10분, 2026-04) | `tts_server.backend` | ✅ 2026-06-08 | ⚠️ **로컬 가중치만**, 클라우드 보이스 API 금지 |
+| TTS 서버 | **Qwen3-TTS 1.7B**(zero-shot+감정 instruct 통합, 24kHz, faster-qwen3-tts) | `tts_server.model_id` | ✅ 2026-06-14 **확정** | ⚠️ **로컬 가중치만**, 클라우드 API 금지. LR=2e-6 고정(stack_decision §2) |
 | TTS 노트북/폰 온디바이스 | **Piper (화자별 학습, onnx)** | `serve.tts.backend` | ✅ 2026-06-11 **채택** | 화자 TTS셋(~73분)으로 파인튜닝=**최고 충실도+CPU 실시간**(onnx, torch 불필요). `scripts/train_piper.md`. 학습 전엔 Kokoro(제로샷)/placeholder 폴백 |
 | RAG 임베딩 | EmbeddingGemma | `serve.rag.embedder` | ✅ | 오픈 |
 | 장기기억 | Mem0 (JSON 폴백) | `serve.memory.backend` | ✅ | 오픈 |
-| 서빙 | vLLM(GPU) / Ollama·LiteRT(노트북·폰) | `serve.llm.backend` | ✅ | 오픈 |
+| 서빙 | **llama.cpp(llama-server)** GPU·노트북 공통 / LiteRT(폰) | `serve.llm.backend=llama` | ✅ 2026-06-14 **변경** | vLLM/Ollama Qwen3.5 GDN 저속 → llama.cpp(stack_decision §3) |
 | 실시간 오케스트레이션 | 경량 자체 루프(→Pipecat/LiveKit 확장) | `serve.orchestration` | ✅ | 오픈 |
 
 ### 기기별 배치 (자동 선택 — `common/hardware.detect_tier`)
@@ -97,7 +102,7 @@ cd ui && npm install && npm run dev   # :5173
 
 | 티어 | 감지 조건 | LLM | 실시간 ASR | TTS | 비고 |
 |---|---|---|---|---|---|
-| **server_gpu** | NVIDIA GPU(H100 등) | Gemma 4 **12B** (vLLM) | large-v3-turbo fp16 | Qwen3-TTS/VoxCPM2 48k | 첫 음성 <0.8~1.2s 달성 |
+| **server_gpu** | NVIDIA GPU(4090/A100 등) | **Qwen3.5-9B** uncensored/aggressive (llama.cpp) | large-v3-turbo fp16 | **Qwen3-TTS 1.7B**(감정 instruct) | 첫 음성 <0.8~1.2s. stack_decision §1~3 |
 | **laptop (Arc iGPU)** | Intel Arc(예: 갤북5 Pro) | **Qwen3.5-4B+LoRA** (llama.cpp GGUF/Vulkan) | large-v3-turbo / small int8 | **Piper(화자학습)** | ~20 tok/s 실시간. docs/3 |
 | **phone** | 온디바이스(명시) | Gemma 4 **E4B/E2B**+QAT | small / Gemma4 오디오 | per-speaker 소형 | LiteRT/MediaPipe/MLX |
 

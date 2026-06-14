@@ -29,6 +29,8 @@ class PersonaLLM:
             cfg = load_config(llm_cfg_name)
         self.cfg = cfg
         self.gen = self.cfg.get("generation", {})
+        self._persona_override: str | None = None   # 통화 시 주입(이 사람은 누구)
+        self._situation: str | None = None          # 통화 시 주입(지금 상황)
         self._llm = self._try_load()
         self._rag = None
         try:
@@ -48,6 +50,11 @@ class PersonaLLM:
             log.warning("vLLM 미설치/모델없음(%s) — 폴백 응답", e)
             return None
 
+    def set_context(self, persona: str | None = None, situation: str | None = None):
+        """통화 페르소나/상황 주입(orchestrator.set_context 가 호출)."""
+        self._persona_override = persona
+        self._situation = situation
+
     def _rag_ctx(self, user_text: str) -> str | None:
         if self._rag:
             try:
@@ -58,7 +65,9 @@ class PersonaLLM:
 
     def chat(self, user_text: str, history: list[dict] | None = None) -> str:
         msgs = build_messages(self.speaker, user_text, history,
-                              rag_context=self._rag_ctx(user_text))
+                              rag_context=self._rag_ctx(user_text),
+                              persona_override=self._persona_override,
+                              situation=self._situation)
         if self._llm is not None:
             raise NotImplementedError("vLLM generate 연결 지점")
         return self._fallback(user_text)

@@ -44,6 +44,8 @@ class LlamaPersonaLLM:
         self.temperature = temperature
         self.timeout = timeout
         self.persona = load_persona(speaker)
+        self._persona_override: str | None = None   # 통화 시 주입(이 사람은 누구)
+        self._situation: str | None = None          # 통화 시 주입(지금 상황)
         self._rag = None
         if use_rag:
             try:
@@ -69,9 +71,20 @@ class LlamaPersonaLLM:
                 f"llama-server 응답 없음({self.base_url}). "
                 f"먼저 llama-server 를 띄워라(scripts/run_llama_server.md): {e}") from e
 
+    # ----- 컨텍스트 주입(통화 페르소나/상황) ------------------------------
+    def set_context(self, persona: str | None = None, situation: str | None = None):
+        self._persona_override = persona
+        self._situation = situation
+
     # ----- 메시지 조립 ----------------------------------------------------
     def _system(self, user_text: str) -> str:
-        sys = self.persona
+        # persona_override 있으면 학습 페르소나 대체(통화 시 "이 사람은 누구").
+        sys = (self._persona_override.strip()
+               if (self._persona_override and self._persona_override.strip())
+               else self.persona)
+        if self._situation and self._situation.strip():
+            sys += ("\n\n[지금 통화 상황 — 이 맥락에서 대화한다]\n"
+                    + self._situation.strip())
         if self._rag:
             try:
                 ctx = self._rag.context(user_text, k=3)
