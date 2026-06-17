@@ -152,6 +152,11 @@ def _tts_stream_emo(tts, text: str, emotion: str):
         yield from tts.synth_stream(text)
 
 
+def _silence(sr: int, ms: int) -> np.ndarray:
+    """문장 사이 텀(무음) — 급박하게 안 들리게."""
+    return np.zeros(max(0, int(sr * ms / 1000)), dtype=np.float32)
+
+
 class Orchestrator:
     def __init__(self, speaker: str, serve_cfg: dict | None = None):
         cfg = serve_cfg or load_config("serve")
@@ -161,10 +166,15 @@ class Orchestrator:
         self.llm = _pick_llm(speaker, cfg)
         self.tts = _pick_tts(speaker, cfg)
         # TTS 감정 활성 시 LLM 이 [emotion:..] 라벨을 내도록(문맥→톤 변화). 백엔드가 지원할 때만.
-        if bool((cfg.get("tts", {}) or {}).get("emotion", True)):
+        tcfg = cfg.get("tts", {}) or {}
+        if bool(tcfg.get("emotion", True)):
             fn = getattr(self.llm, "set_emotion_labeling", None)
             if callable(fn):
                 fn(True)
+        # 합성 단위: full = 응답 통째 1회(운율 일관 + 구두점 자연 텀, 톤 안 튐) /
+        #           sentence = 문장별(첫음성 최저지연, WS 스트리밍용). 사이엔 무음 텀.
+        self.synth_mode = str(tcfg.get("synth_mode", "full"))
+        self.sentence_pause_ms = int(tcfg.get("sentence_pause_ms", 180))
         self.history: list[dict] = []
         self._interrupt = threading.Event()
 
@@ -198,29 +208,38 @@ class Orchestrator:
         if not user_text.strip():
             return turn
 
-        first = False
+        # 1) LLM 응답 전체 수집(감정은 첫 감정 유지). 전화 응답은 짧아 수집 비용 작음.
         emotion = "neutral"
-        parts = []
+        parts: list[str] = []
         for sentence in self.llm.chat_stream(user_text, self.history):
             if self._interrupt.is_set():
                 turn.interrupted = True
                 break
             emotion, clean = _parse_emotion(sentence, emotion)   # §4-1 감정 추출
-            if not clean:
-                continue
-            parts.append(clean)
-            for chunk in _tts_stream_emo(self.tts, clean, emotion):
-                if self._interrupt.is_set():
-                    turn.interrupted = True
-                    break
-                if not first:
-                    turn.first_audio_latency_ms = (time.time() - t0) * 1000
-                    first = True
-                turn.audio_chunks.append(chunk)
-            if turn.interrupted:
-                break
-
+            if clean:
+                parts.append(clean)
         turn.reply_text = " ".join(parts)
+
+        # 2) 합성: full = 응답 통째 1회(운율 일관·톤 안 튐, 구두점 자연 텀) /
+        #          sentence = 문장별 + 사이 무음(저지연). barge-in 은 청크마다 존중.
+        if parts and not turn.interrupted:
+            sr_out = getattr(self.tts, "sr", 24000)
+            segments = [turn.reply_text] if self.synth_mode == "full" else parts
+            first = False
+            for i, seg in enumerate(segments):
+                if i > 0 and self.sentence_pause_ms > 0:
+                    turn.audio_chunks.append(_silence(sr_out, self.sentence_pause_ms))
+                for chunk in _tts_stream_emo(self.tts, seg, emotion):
+                    if self._interrupt.is_set():
+                        turn.interrupted = True
+                        break
+                    if not first:
+                        turn.first_audio_latency_ms = (time.time() - t0) * 1000
+                        first = True
+                    turn.audio_chunks.append(chunk)
+                if turn.interrupted:
+                    break
+
         if turn.reply_text:
             self.history.append({"role": "user", "content": user_text})
             self.history.append({"role": "assistant", "content": turn.reply_text})
@@ -247,12 +266,15 @@ class Orchestrator:
         first = False
         emotion = "neutral"
         parts: list[str] = []
+        sr_out = getattr(self.tts, "sr", 24000)
         for sentence in self.llm.chat_stream(user_text, self.history):
             if self._interrupt.is_set():
                 yield ("interrupted", None); break
             emotion, clean = _parse_emotion(sentence, emotion)   # §4-1 감정 추출
             if not clean:
                 continue
+            if parts and self.sentence_pause_ms > 0:             # 문장 사이 텀(무음)
+                yield ("audio", _silence(sr_out, self.sentence_pause_ms))
             parts.append(clean)
             yield ("emotion", emotion)
             yield ("text", clean)

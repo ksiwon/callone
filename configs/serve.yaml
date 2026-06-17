@@ -43,6 +43,10 @@ tts:
   chunk_size: 25               # 실측(2026-06-17): 8은 끊김 → 25가 톤/지연 최적
   temperature: 0.5             # 실측: 0.9 흔들림 → 0.5 톤 안정
   emotion: true                # LLM emotion 키 → instruct 동적 주입
+  # 합성 단위: full = 응답 통째 1회(운율 일관·톤 안 튐·구두점 자연 텀, 턴제/짧은응답 권장) /
+  #           sentence = 문장별(첫음성 최저지연, WS 실시간용). 문장 사이엔 무음 텀.
+  synth_mode: full
+  sentence_pause_ms: 180       # 문장 사이 무음(급박함 완화). 0 이면 없음
   # 제로샷 참조(7~10초, 24kHz, 잡음 없음). ref_wav 비면 data/speakers/{spk}/ref_24k.wav 자동탐색.
   # ref_text 비면 같은 폴더 ref_text.txt → 없으면 자동전사(품질 위해 ref_text.txt 권장).
   ref_wav: ""                  # 예: data/speakers/A/ref_24k.wav

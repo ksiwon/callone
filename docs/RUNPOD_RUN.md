@@ -203,10 +203,18 @@ GRADIO_SHARE=1 python -m studio                   # 출력의 https://....gradio
 > 포트로 직접 쓰려면(대안): Pod에 50000 노출 후 `PORT=50000 python -m studio` → RunPod Connect 의 50000 주소.
 > 풀 실시간(WebSocket·barge-in)은 `callone-serve`(:8000) + `ui`(:5173).
 
+> ⚠️ **체감 지연:** studio 턴제는 **응답 합성이 다 끝나야** 음성이 나온다(첫음성 ms 와 별개).
+> + **gradio.live 터널**이 왕복 지연을 더한다(~2초). 빠르게 하려면 ①**직접 포트**(50000 노출, 터널 회피)
+> ②`llm.max_new_tokens`↓(짧은 응답) ③진짜 저지연은 **WS 스트리밍**(`callone-serve`, 음성이 도착하는 대로 재생).
+
 ---
 
 ## 통화 품질 올리기 (선택)
+- **문장 톤 튐 / 급박함:** `serve.yaml tts.synth_mode: full`(기본) = 응답을 통째 1회 합성 →
+  운율 일관(톤 안 튐) + 구두점 자연 텀. `sentence_pause_ms`(기본 180) 로 문장 사이 무음 조절.
+  (저지연이 더 급하면 `synth_mode: sentence` = 문장별 스트리밍, 단 톤 약간 튐.)
 - **페르소나:** studio 통화칸 페르소나/상황을 구체적으로(예 "항상 반말, 오빠라고 불러"). base 모델 호칭/말투 흔들림 잡힘.
+- **맥락 길이:** `serve.yaml llm.max_history`(기본 24=12턴) ↑ 로 긴 통화도 앞 맥락 유지.
 - **학습본 음색(최고):** A100에서 만든 화자 LoRA→GGUF 병합본을 6번 `-m` 으로 교체(말투 내재화). 음색은 Piper 학습본이 제로샷보다 충실.
 - **데이터/RAG:** `data/speakers/{spk}/` 에 profile.json + utterances 두면 기억·말투 진해짐.
 
