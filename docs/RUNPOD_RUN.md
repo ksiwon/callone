@@ -218,6 +218,10 @@ GRADIO_SHARE=1 python -m studio                   # 출력의 https://....gradio
 - **다채로운 감정:** 13종 팔레트(happy/sad/angry/excited/surprised/tender/playful/worried/shy/tired/
   disappointed/proud/neutral). LLM 이 맥락 따라 `[emotion:..]` 선택 → TTS instruct 로 톤 변화.
   추가하려면 `tts_qwen.EMOTION_MAP`+`tts_server.yaml emotion_instruct`+`llama_llm` 프롬프트에 같이.
+  - ⚠️ **제로샷 음색 vs 감정 trade-off:** instruct 를 강하게 걸면 음색이 원본에서 밀려 **다른 사람**처럼
+    들린다. 그래서 instruct 는 "같은 목소리 유지, 톤만 살짝"으로 **은은하게**(기본). 음색이 최우선이면
+    `serve.yaml tts.emotion: false`(감정 off, neutral 고정 = 최대 충실도). 진짜 풍부한 감정+충실도는
+    제로샷 한계 → **화자 학습본**(Piper 등)이 답.
 - **페르소나:** studio 통화칸 페르소나/상황을 구체적으로(예 "항상 반말, 오빠라고 불러"). base 모델 호칭/말투 흔들림 잡힘.
 - **맥락 길이:** `serve.yaml llm.max_history`(기본 24=12턴) ↑ 로 긴 통화도 앞 맥락 유지.
 - **학습본 음색(최고):** A100에서 만든 화자 LoRA→GGUF 병합본을 6번 `-m` 으로 교체(말투 내재화). 음색은 Piper 학습본이 제로샷보다 충실.

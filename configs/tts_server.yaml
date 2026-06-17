@@ -27,19 +27,20 @@ inference:
 streaming: true
 # 감정 instruct 매핑(orchestrator 가 LLM emotion 키로 주입) — tts_qwen.EMOTION_MAP 와 동일 의미
 emotion_instruct:
-  happy:   "Speak with a bright, cheerful, and warm tone."
-  sad:     "Speak with a low, slow, comforting, and sad tone."
-  angry:   "Speak with an annoyed, sharp, and frustrated voice."
+  # ⚠️ 은은하게 — 강하면 제로샷 음색이 밀려 다른 사람처럼 됨(같은 목소리 유지하며 톤만 살짝).
+  happy:   "Speak in the same natural voice, just slightly bright and warm."
+  sad:     "Speak in the same natural voice, just slightly soft and downcast."
+  angry:   "Speak in the same natural voice, just slightly firm and annoyed."
   neutral: "Speak in a natural, relaxed, conversational tone."
-  excited: "Speak with high energy and an excited, upbeat tone."
-  surprised: "Speak with a surprised, slightly startled tone."
-  tender: "Speak softly and warmly, with affection and care."
-  playful: "Speak in a light, teasing, playful tone with a smile."
-  worried: "Speak with an anxious, concerned, slightly hesitant tone."
-  shy: "Speak in a shy, bashful, soft-spoken way."
-  tired: "Speak in a weary, low-energy tone, like sighing."
-  disappointed: "Speak in a let-down, subdued, disappointed tone."
-  proud: "Speak with a warm, proud, satisfied tone."
+  excited: "Speak in the same natural voice, just a bit livelier and upbeat."
+  surprised: "Speak in the same natural voice, with a brief light surprise."
+  tender: "Speak in the same natural voice, just slightly soft and affectionate."
+  playful: "Speak in the same natural voice, just slightly light and teasing."
+  worried: "Speak in the same natural voice, just slightly concerned."
+  shy: "Speak in the same natural voice, just slightly soft and bashful."
+  tired: "Speak in the same natural voice, just slightly low-energy."
+  disappointed: "Speak in the same natural voice, just slightly let down."
+  proud: "Speak in the same natural voice, just slightly warm and proud."
 output_dir: "models/tts_server"
 eval:
   secs_min: 0.70               # 화자 유사도 임계

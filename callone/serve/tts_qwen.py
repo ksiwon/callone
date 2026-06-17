@@ -36,20 +36,22 @@ log = get_logger("tts_qwen")
 # §2-3 EMOTION_MAP — LLM 이 판단한 emotion 키 → 자연어 instruct(generate 의 instruct 인자로 주입)
 # 다채로운 통화 감정 팔레트. 모르는 감정은 _instruct 가 neutral 로 폴백.
 # ⚠️ 키 집합은 orchestrator._EMOTIONS · configs/tts_server.yaml · llama_llm 프롬프트와 맞출 것.
+# ⚠️ 제로샷 음색 보존을 위해 instruct 는 "은은하게" — 강하게 걸면 원본 음색이 밀려 다른 사람처럼 됨.
+#    각 지시는 같은 화자 목소리를 유지하며 톤만 살짝 바꾸도록 약하게(slightly/keep natural).
 EMOTION_MAP = {
-    "happy":        "Speak with a bright, cheerful, and warm tone.",
-    "sad":          "Speak with a low, slow, and sad tone, voice a little heavy.",
-    "angry":        "Speak with an annoyed, sharp, and frustrated voice.",
+    "happy":        "Speak in the same natural voice, just slightly bright and warm.",
+    "sad":          "Speak in the same natural voice, just slightly soft and downcast.",
+    "angry":        "Speak in the same natural voice, just slightly firm and annoyed.",
     "neutral":      "Speak in a natural, relaxed, conversational tone.",
-    "excited":      "Speak with high energy and an excited, upbeat tone.",
-    "surprised":    "Speak with a surprised, slightly startled tone.",
-    "tender":       "Speak softly and warmly, with affection and care.",
-    "playful":      "Speak in a light, teasing, playful tone with a smile.",
-    "worried":      "Speak with an anxious, concerned, slightly hesitant tone.",
-    "shy":          "Speak in a shy, bashful, soft-spoken way.",
-    "tired":        "Speak in a weary, low-energy tone, like sighing.",
-    "disappointed": "Speak in a let-down, subdued, disappointed tone.",
-    "proud":        "Speak with a warm, proud, satisfied tone.",
+    "excited":      "Speak in the same natural voice, just a bit livelier and upbeat.",
+    "surprised":    "Speak in the same natural voice, with a brief light surprise.",
+    "tender":       "Speak in the same natural voice, just slightly soft and affectionate.",
+    "playful":      "Speak in the same natural voice, just slightly light and teasing.",
+    "worried":      "Speak in the same natural voice, just slightly concerned.",
+    "shy":          "Speak in the same natural voice, just slightly soft and bashful.",
+    "tired":        "Speak in the same natural voice, just slightly low-energy.",
+    "disappointed": "Speak in the same natural voice, just slightly let down.",
+    "proud":        "Speak in the same natural voice, just slightly warm and proud.",
 }
 
 
