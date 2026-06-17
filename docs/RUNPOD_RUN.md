@@ -213,6 +213,11 @@ GRADIO_SHARE=1 python -m studio                   # 출력의 https://....gradio
 - **문장 톤 튐 / 급박함:** `serve.yaml tts.synth_mode: full`(기본) = 응답을 통째 1회 합성 →
   운율 일관(톤 안 튐) + 구두점 자연 텀. `sentence_pause_ms`(기본 180) 로 문장 사이 무음 조절.
   (저지연이 더 급하면 `synth_mode: sentence` = 문장별 스트리밍, 단 톤 약간 튐.)
+- **사람처럼 말하기:** LLM system 에 강한 스타일 지시 내장(구어체·추임새·비서말투 금지·감정 반응).
+  더 생생하게는 `serve.yaml llm.temperature`↑(기본 0.7, 횡설수설하면 ↓). 페르소나로 캐릭터 고정.
+- **다채로운 감정:** 13종 팔레트(happy/sad/angry/excited/surprised/tender/playful/worried/shy/tired/
+  disappointed/proud/neutral). LLM 이 맥락 따라 `[emotion:..]` 선택 → TTS instruct 로 톤 변화.
+  추가하려면 `tts_qwen.EMOTION_MAP`+`tts_server.yaml emotion_instruct`+`llama_llm` 프롬프트에 같이.
 - **페르소나:** studio 통화칸 페르소나/상황을 구체적으로(예 "항상 반말, 오빠라고 불러"). base 모델 호칭/말투 흔들림 잡힘.
 - **맥락 길이:** `serve.yaml llm.max_history`(기본 24=12턴) ↑ 로 긴 통화도 앞 맥락 유지.
 - **학습본 음색(최고):** A100에서 만든 화자 LoRA→GGUF 병합본을 6번 `-m` 으로 교체(말투 내재화). 음색은 Piper 학습본이 제로샷보다 충실.

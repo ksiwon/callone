@@ -34,13 +34,22 @@ from ..common.logging import get_logger
 log = get_logger("tts_qwen")
 
 # §2-3 EMOTION_MAP — LLM 이 판단한 emotion 키 → 자연어 instruct(generate 의 instruct 인자로 주입)
+# 다채로운 통화 감정 팔레트. 모르는 감정은 _instruct 가 neutral 로 폴백.
+# ⚠️ 키 집합은 orchestrator._EMOTIONS · configs/tts_server.yaml · llama_llm 프롬프트와 맞출 것.
 EMOTION_MAP = {
-    "happy":   "Speak with a bright, cheerful, and warm tone.",
-    "sad":     "Speak with a low, slow, comforting, and sad tone.",
-    "angry":   "Speak with an annoyed, sharp, and frustrated voice.",
-    "neutral": "Speak in a natural, relaxed, conversational tone.",
-    "excited": "Speak with high energy and an excited, upbeat tone.",
-    "surprised": "Speak with a surprised, slightly startled tone.",
+    "happy":        "Speak with a bright, cheerful, and warm tone.",
+    "sad":          "Speak with a low, slow, and sad tone, voice a little heavy.",
+    "angry":        "Speak with an annoyed, sharp, and frustrated voice.",
+    "neutral":      "Speak in a natural, relaxed, conversational tone.",
+    "excited":      "Speak with high energy and an excited, upbeat tone.",
+    "surprised":    "Speak with a surprised, slightly startled tone.",
+    "tender":       "Speak softly and warmly, with affection and care.",
+    "playful":      "Speak in a light, teasing, playful tone with a smile.",
+    "worried":      "Speak with an anxious, concerned, slightly hesitant tone.",
+    "shy":          "Speak in a shy, bashful, soft-spoken way.",
+    "tired":        "Speak in a weary, low-energy tone, like sighing.",
+    "disappointed": "Speak in a let-down, subdued, disappointed tone.",
+    "proud":        "Speak with a warm, proud, satisfied tone.",
 }
 
 

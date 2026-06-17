@@ -33,6 +33,13 @@ emotion_instruct:
   neutral: "Speak in a natural, relaxed, conversational tone."
   excited: "Speak with high energy and an excited, upbeat tone."
   surprised: "Speak with a surprised, slightly startled tone."
+  tender: "Speak softly and warmly, with affection and care."
+  playful: "Speak in a light, teasing, playful tone with a smile."
+  worried: "Speak with an anxious, concerned, slightly hesitant tone."
+  shy: "Speak in a shy, bashful, soft-spoken way."
+  tired: "Speak in a weary, low-energy tone, like sighing."
+  disappointed: "Speak in a let-down, subdued, disappointed tone."
+  proud: "Speak with a warm, proud, satisfied tone."
 output_dir: "models/tts_server"
 eval:
   secs_min: 0.70               # 화자 유사도 임계

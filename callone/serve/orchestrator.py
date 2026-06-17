@@ -118,7 +118,8 @@ def _pick_tts(speaker: str, serve_cfg: dict):
         return StreamTTS(speaker)
 
 
-_EMOTIONS = ("happy", "sad", "angry", "neutral", "excited", "surprised")
+_EMOTIONS = ("happy", "sad", "angry", "neutral", "excited", "surprised",
+             "tender", "playful", "worried", "shy", "tired", "disappointed", "proud")
 
 
 def _parse_emotion(text: str, default: str = "neutral") -> tuple[str, str]:
@@ -138,15 +139,15 @@ def _parse_emotion(text: str, default: str = "neutral") -> tuple[str, str]:
         except json.JSONDecodeError:
             pass
     # 맨 앞 감정 태그 제거 — 단어 무관하게(브래킷이 TTS 로 새어 읽히는 것 방지).
-    #   ① [emotion:xxx]/[emotion=xxx] : 안의 단어가 뭐든(모르는 감정 포함) 통째로 제거
-    #   ② 베어 [happy]/(sad) : 알려진 감정만
+    #   ① [emotion:xxx]/[emotion=xxx] : 안의 단어가 뭐든 통째 제거 + 그 감정 그대로 전달
+    #      (TTS EMOTION_MAP 이 모르는 감정은 neutral 로 폴백 → 팔레트 확장 시 코드 수정 불필요).
+    #   ② 베어 [happy]/(sad) : 알려진 감정만(괄호 속 일반 텍스트 오제거 방지).
     m = re.match(r"^\s*\[\s*emotion\s*[:=]\s*([^\]]+?)\s*\]\s*", s, re.IGNORECASE)
-    if not m:
-        m = re.match(r"^\s*[\[(]\s*(happy|sad|angry|neutral|excited|surprised)\s*[\])]\s*",
-                     s, re.IGNORECASE)
     if m:
-        emo = m.group(1).strip().lower()
-        return (emo if emo in _EMOTIONS else default), s[m.end():].strip()
+        return m.group(1).strip().lower(), s[m.end():].strip()
+    m = re.match(r"^\s*[\[(]\s*(" + "|".join(_EMOTIONS) + r")\s*[\])]\s*", s, re.IGNORECASE)
+    if m:
+        return m.group(1).lower(), s[m.end():].strip()
     return default, s
 
 

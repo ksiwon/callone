@@ -28,7 +28,7 @@ llm:
   use_rag: false               # 사실 추출 후 true 로
   embedder: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # fastembed 지원본(한국어 OK)
   rag_min_score: 0.45          # 게이트(MiniLM 기준): 미만이면 기억 안 씀. 허위회상 잦으면 ↑, 회상 약하면 ↓
-  temperature: 0.4             # 낮추면 덜 산만(횡설수설 억제)
+  temperature: 0.7             # 사람처럼 생생·다채롭게(강한 스타일프롬프트+토큰캡이 산만함 억제). 횡설수설하면 ↓
   top_p: 0.8
   top_k: 20
   max_new_tokens: 64           # 전화 턴 짧게(LoRA 가 길게 주절거리는 것 캡)
