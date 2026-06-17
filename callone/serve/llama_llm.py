@@ -107,8 +107,8 @@ class LlamaPersonaLLM:
         sys += "\n전화 통화처럼 1~2문장으로 짧고 자연스럽게 답한다."
         if self._emotion_labels:
             # 응답 맨 앞에 감정 태그 1개. _parse_emotion 이 추출·제거 → TTS 톤 동적 변화.
-            sys += ("\n응답 맨 앞에 지금 감정을 [emotion:happy|sad|angry|neutral|excited] "
-                    "중 하나로 딱 붙여라(은은하게). 예: '[emotion:happy] 어, 왔나!'")
+            sys += ("\n응답 맨 앞에 지금 감정을 [emotion:happy|sad|angry|neutral|excited|surprised] "
+                    "중 **딱 하나만** 영어로 붙여라(다른 단어 금지, 은은하게). 예: '[emotion:happy] 어, 왔나!'")
         return sys
 
     def _messages(self, user_text: str, history: list[dict] | None) -> list[dict]:

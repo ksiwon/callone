@@ -40,6 +40,7 @@ EMOTION_MAP = {
     "angry":   "Speak with an annoyed, sharp, and frustrated voice.",
     "neutral": "Speak in a natural, relaxed, conversational tone.",
     "excited": "Speak with high energy and an excited, upbeat tone.",
+    "surprised": "Speak with a surprised, slightly startled tone.",
 }
 
 

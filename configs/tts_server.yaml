@@ -32,6 +32,7 @@ emotion_instruct:
   angry:   "Speak with an annoyed, sharp, and frustrated voice."
   neutral: "Speak in a natural, relaxed, conversational tone."
   excited: "Speak with high energy and an excited, upbeat tone."
+  surprised: "Speak with a surprised, slightly startled tone."
 output_dir: "models/tts_server"
 eval:
   secs_min: 0.70               # 화자 유사도 임계
