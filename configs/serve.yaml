@@ -35,13 +35,14 @@ llm:
 tts:
   backend: qwen3-tts           # §2: Qwen3-TTS 1.7B(감정 instruct 통합). 미설치 시 piper/kokoro 폴백
   stream: true
-  first_chunk_target_ms: 159   # §2: chunk_size=8 → TTFA ~97~159ms
-  lora_scale: 0.3              # 화자 LoRA 적용 강도(tts_server.yaml 과 동일)
-  chunk_size: 8
+  first_chunk_target_ms: 700   # 실측: chunk_size=25 → 워밍업 후 첫청크 ~0.67s
+  chunk_size: 25               # 실측(2026-06-17): 8은 끊김 → 25가 톤/지연 최적
+  temperature: 0.5             # 실측: 0.9 흔들림 → 0.5 톤 안정
   emotion: true                # LLM emotion 키 → instruct 동적 주입
-  # 제로샷 참조(학습본 없을 때): 화자 참조 WAV/전사(7~10초, 24kHz, 잡음 없음)
+  # 제로샷 참조(7~10초, 24kHz, 잡음 없음). ref_wav 비면 data/speakers/{spk}/ref_24k.wav 자동탐색.
+  # ref_text 비면 같은 폴더 ref_text.txt → 없으면 자동전사(품질 위해 ref_text.txt 권장).
   ref_wav: ""                  # 예: data/speakers/A/ref_24k.wav
-  ref_text: ""                 # 참조 WAV 의 실제 발화 텍스트(정확히 일치)
+  ref_text: ""                 # 비우면 ref_text.txt/자동전사로 해결
 orchestration: pipecat         # Pipecat + LiveKit(WebRTC)
 latency_budget_ms: 1200        # 첫 음성 < 1.2s, 목표 0.8s
 rag:

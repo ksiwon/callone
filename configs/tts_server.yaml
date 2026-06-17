@@ -19,9 +19,11 @@ finetune:
   lora_alpha: 32
   batch_size: 4
   # 학습 전 체크: 24kHz 리샘플 / annotation 태그 제거 / 클립끝 1초 묵음 / commit 680d4e9+ / PR#178
+ref_transcribe_model: "small"  # ref_text.txt 없을 때 자동전사용(권장: ref_text.txt 직접 두기)
 inference:
-  lora_scale: 0.3              # 0.2/0.3/0.35/0.5 스윕 후 최적값
-  chunk_size: 8                # TTFA ~159ms
+  lora_scale: 0.3              # (서빙 미사용 — faster_qwen3_tts LoRA 미지원)
+  chunk_size: 25               # 실측(2026-06-17): 8은 끊김 → 25가 톤/지연 최적(첫청크 ~0.67s)
+  temperature: 0.5             # 0.9는 흔들림 → 0.5가 톤 안정(실측). 0.5~0.7 권장
 streaming: true
 # 감정 instruct 매핑(orchestrator 가 LLM emotion 키로 주입) — tts_qwen.EMOTION_MAP 와 동일 의미
 emotion_instruct:
