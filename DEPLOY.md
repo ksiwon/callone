@@ -3,6 +3,9 @@
 > 이 문서 하나로 **서버 올리기 → 모델 받기 → 띄우기 → 확인**까지. 신스택 기준
 > (Qwen3.5-9B uncensored/aggressive + Qwen3-TTS 1.7B + llama.cpp). 모델 결정은
 > [`callone_stack_decision.md`](callone_stack_decision.md), 통합 앱은 [`studio/README.md`](studio/README.md).
+>
+> 🚀 **RunPod 4090 켜서 바로 따라가는 순서(확정·복붙) = [`docs/RUNPOD_RUN.md`](docs/RUNPOD_RUN.md).**
+> 이 DEPLOY 는 근거·대안·트러블슈팅 레퍼런스. 실행은 RUNPOD_RUN 을 위→아래로.
 
 전제: 한 폴더 `callone/` 안에 `callone`(패키지)·`studio`(통합앱)·`voice_clone`·configs·scripts 공존.
 
@@ -29,18 +32,18 @@ git clone <your-repo> callone && cd callone
 # (택2) 로컬에서 업로드 — Windows: scripts/upload_to_elice.ps1 참고(.venv/.git/node_modules 제외)
 ```
 
-### 1-2. 환경 설치 (ffmpeg + venv + 의존성 한방)
+### 1-2. 환경 설치 — ⚠️ **통화 서빙은 setup_serve_gpu.sh** (heavy 와 섞지 말 것)
+실시간 통화(4090)는 **서빙 전용 환경**이다. 데이터 파이프라인용 `.[heavy]`(transformers<4.50 +
+pyannote 3.x)와 Qwen3-TTS(transformers==4.57.3)는 **충돌**하므로 별 venv(`.venv-serve`)에 깐다.
 ```bash
 cd callone
-bash scripts/setup_server.sh                 # ffmpeg→venv→pip install -e ".[heavy]"
+bash scripts/setup_serve_gpu.sh              # ffmpeg→.venv-serve→torch(cu124)→faster-whisper+faster-qwen3-tts
 # CUDA 버전 다르면:
-CUDA_INDEX=https://download.pytorch.org/whl/cu124 bash scripts/setup_server.sh
+CUDA_INDEX=https://download.pytorch.org/whl/cu121 bash scripts/setup_serve_gpu.sh
+source .venv-serve/bin/activate
 ```
-studio 앱까지 쓰려면:
-```bash
-source .venv/bin/activate
-pip install -r studio/requirements.txt       # gradio, faster-whisper 등
-```
+> LLM 은 이 venv 에 없다 — `llama-server`(컴파일 바이너리)로 HTTP 서빙(§3-1)이라 파이썬 충돌 0.
+> 화자분리·학습까지 같은 박스에서 하려면 그건 **별도** `bash scripts/setup_server.sh`(.[heavy], 다른 venv).
 
 ### 1-3. 환경변수 (Stop/Start 후에도 모델 유지 — /workspace 에 캐시)
 ```bash
@@ -85,13 +88,13 @@ export COSYVOICE_MODEL_DIR=/path/to/pretrained_models/Fun-CosyVoice3-0.5B
 ```bash
 # llama.cpp 빌드(최초 1회): scripts/run_llama_server.md 참고
 ./llama-server \
-  -m /workspace/models/llm_A/qwen3.5-9b-uncensored-aggressive-Q4_K_M.gguf \
+  -m /workspace/models/llm_A/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf \
   --host 127.0.0.1 --port 8080 \
   -c 8192 -n 512 --n-gpu-layers 99 --flash-attn
 # health: curl http://127.0.0.1:8080/health  → {"status":"ok"}
 ```
-> ⚠️ 결정서 §5는 8001 포트를 쓰지만 callone 코드 기본은 **8080**. 바꾸려면
-> `configs/serve.yaml` 의 `llm.base_url` 도 같이 수정.
+> 포트는 **8080 으로 통일**(코드 기본값 = `serve.yaml llm.base_url` = 결정서). 다른 포트를 쓰려면
+> llama-server `--port` 와 `configs/serve.yaml` 의 `llm.base_url` 을 같은 값으로 맞춘다.
 
 ### 3-2-A. studio 통합 앱
 ```bash

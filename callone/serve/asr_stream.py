@@ -30,7 +30,15 @@ def _load(model: str):
     dev = resolve_device()
     ct = compute_type_for(dev)
     log.info("스트리밍 ASR 로드: model=%s device=%s compute=%s", model, dev, ct)
-    return WhisperModel(model, device=dev, compute_type=ct)
+    try:
+        return WhisperModel(model, device=dev, compute_type=ct)
+    except Exception as e:  # noqa: BLE001
+        # ctranslate2>=4.5 ↔ cuDNN9/CUDA 불일치 등 GPU 로드 실패 → CPU int8 자동 폴백.
+        # (폴백 없으면 매 턴 빈 전사 → 통화가 조용히 먹통. studio backends 와 동일 처리.)
+        if dev == "cuda":
+            log.warning("ASR GPU 로드 실패(%s) — CPU int8 폴백(ct2/cuDNN 버전 확인)", e)
+            return WhisperModel(model, device="cpu", compute_type="int8")
+        raise
 
 
 class StreamASR:

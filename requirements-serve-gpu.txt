@@ -1,0 +1,43 @@
+# callone 서버(RTX 4090) 실시간 통화 — 서빙 전용 의존성.
+#
+# ⚠️ requirements-heavy.txt / pip install -e ".[heavy]" 와 절대 같은 venv 에 섞지 마라.
+#    heavy 는 데이터 파이프라인(화자분리/학습)용이라 transformers<4.50 + pyannote 3.x +
+#    huggingface_hub<1.0 으로 일부러 옛 버전에 고정돼 있다. 반면 Qwen3-TTS(faster-qwen3-tts)
+#    는 transformers==4.57.3(qwen-tts 하드핀) 을 요구 → 한 환경에 섞으면 transformers 정면충돌.
+#    4090 은 "서빙 전용". 분리/학습은 A100 에서 이미 끝났다(별 venv).
+#
+# LLM 은 여기 없다 → llama-server(컴파일된 별도 바이너리)로 HTTP 서빙(파이썬 의존성 0, 충돌 0).
+#   빌드: scripts/run_llama_server.md (CUDA: cmake -B build -DGGML_CUDA=ON)
+#
+# ── 설치 순서 (반드시 이 순서, scripts/setup_serve_gpu.sh 가 자동화) ─────────────
+# 0) ffmpeg (브라우저 마이크 opus/webm 변환):  apt install -y ffmpeg
+# 1) torch 를 CUDA 인덱스에서 먼저 (faster-qwen3-tts 가 torch>=2.5.1 요구. 미리 안 깔면 잘못된 휠):
+#      pip install --index-url https://download.pytorch.org/whl/cu124 torch torchaudio
+# 2) callone 코어(폴백 배관, heavy 아님):  pip install -e .
+# 3) 이 파일:  pip install -r requirements-serve-gpu.txt
+# 4) numpy 핀 재확인(librosa/numba 가 2.4 로 올리면 깨짐 — 반드시 마지막):  pip install "numpy<2.4"
+
+# --- 서빙 API + WebSocket (코어와 중복이나 명시) ---
+fastapi>=0.110
+uvicorn[standard]>=0.27
+websockets>=12.0
+pydantic>=2.5
+pyyaml>=6.0
+python-dotenv>=1.0
+soundfile>=0.12
+
+# --- ASR (faster-whisper = ctranslate2, transformers 의존 없음 → 충돌 안전) ---
+#   GPU(ctranslate2>=4.5)는 cuDNN9/CUDA12.x 필요. 불일치 시 asr_stream 이 CPU int8 자동 폴백.
+faster-whisper>=1.0
+
+# --- TTS (Qwen3-TTS via faster-qwen3-tts, CUDA graph) ---
+#   ⚠️ 이게 transformers==4.57.3(qwen-tts 하드핀)·torchaudio·librosa·accelerate·einops·
+#      onnxruntime 를 끌어온다. transformers 를 여기서 따로 핀하지 마라(충돌 유발).
+faster-qwen3-tts>=0.2.6
+
+# --- studio 통합 앱(:50000)도 쓸 때만 ---
+gradio>=4.0
+pydub>=0.25
+noisereduce>=3.0
+
+# numpy<2.4 는 4) 단계에서 마지막에 별도 설치(여기 두면 faster-qwen3-tts 가 다시 올릴 수 있음).

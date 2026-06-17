@@ -6,7 +6,8 @@
 # 사용자 요구(2026-06-14): "uncensored, aggressive 모델로 반드시".
 # aggressive 변종은 GGUF 전용 → 직접 서빙(SFT 없이)할 때 기본값.
 serve_gguf_repo: "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive"  # GGUF, aggressive 검열해제
-serve_gguf_file: "qwen3.5-9b-uncensored-aggressive-Q4_K_M.gguf"        # 실제 파일명은 repo 확인
+serve_gguf_file: "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf"  # 실파일명(웹검증 2026-06-17, 5.3GB)
+# ⚠️ 이 repo 는 멀티모달(mmproj vision 동봉) — llama-server 텍스트 서빙엔 -Q4_K_M.gguf 만 받으면 됨.
 # LoRA SFT(페르소나 주입)용 학습 베이스 — aggressive 는 GGUF만이라 학습엔 safetensors uncensored 사용.
 # abliteration 은 weight projection 이라 SFT 로 덮어도 refusal 복원 안 됨(§1-2).
 base_model: "huihui-ai/Huihui-Qwen3.5-9B-abliterated"   # safetensors, uncensored (학습 베이스)

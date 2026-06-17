@@ -171,10 +171,10 @@ Qwen3-TTS는 참조 오디오(화자 정체성) + 자연어 instruct_text(감정
 Gemma 4 대신 Qwen3.5가 JSON으로 감정 상태를 출력하도록 SFT하고, orchestrator에서 동적으로 주입:
 
 ```python
-# callone/serve/tts_stream.py
-from faster_qwen3_tts import QwenTTS
+# callone/serve/tts_qwen.py — 실 API(검증 2026-06-17, andimarafioti/faster-qwen3-tts)
+from faster_qwen3_tts import FasterQwen3TTS
 
-tts = QwenTTS(model_name="Qwen/Qwen3-TTS-12Hz-1.7B-Base")
+tts = FasterQwen3TTS.from_pretrained("Qwen/Qwen3-TTS-12Hz-1.7B-Base", device="cuda")
 
 EMOTION_MAP = {
     "happy":   "Speak with a bright, cheerful, and warm tone.",
@@ -191,15 +191,18 @@ def synthesize_streaming(text: str, emotion: str, ref_wav_path: str, ref_text: s
     emotion:      Qwen3.5가 판단한 감정 키
     """
     instruct = EMOTION_MAP.get(emotion, EMOTION_MAP["neutral"])
-    
-    for audio_chunk in tts.generate_voice_clone_streaming(
+
+    # 실 API: ref_audio(경로), language 필수, instruct 로 감정 동시제어, yield=(chunk, sr, timing)
+    for audio_chunk, sr, _timing in tts.generate_voice_clone_streaming(
         text=text,
-        ref_audio_path=ref_wav_path,
+        language="Korean",
+        ref_audio=ref_wav_path,
         ref_text=ref_text,
-        instruct_text=instruct,
+        instruct=instruct,
         chunk_size=8,            # 97~159ms TTFA 달성
     ):
         yield audio_chunk        # FastAPI StreamingResponse로 전달
+    # ⚠️ faster_qwen3_tts 는 LoRA 미지원 — adapter_dir/lora_scale 인자 없음(zero-shot 참조만)
 ```
 
 ### 2-4. Qwen3-TTS LoRA 파인튜닝 (A100, 화자당)
@@ -300,7 +303,7 @@ huggingface-cli download \
 ./build/bin/llama-server \
   -m /workspace/models/llm_A/callone_A_q4_k_m.gguf \
   --host 0.0.0.0 \
-  --port 8001 \
+  --port 8080 \
   -c 8192 \              # 실시간 대화용 컨텍스트 (262K 불필요)
   -n 512 \               # 최대 생성 토큰 (대화 응답 충분)
   --n-gpu-layers 99 \    # 전체 GPU 오프로드
@@ -334,7 +337,7 @@ async def generate_response(messages: list, speaker_id: str) -> str:
     }
     
     async with httpx.AsyncClient() as client:
-        async with client.stream("POST", "http://localhost:8001/v1/chat/completions",
+        async with client.stream("POST", "http://localhost:8080/v1/chat/completions",
                                   json=payload) as r:
             async for chunk in r.aiter_text():
                 yield chunk
@@ -354,7 +357,7 @@ async def generate_response(messages: list, speaker_id: str) -> str:
     ├─ ASR (Whisper large-v3-turbo, 방언 적응 완료)
     │     → 텍스트 출력
     │
-    ├─ LLM (llama-server :8001, Qwen3.5-9B abliterated + SFT)
+    ├─ LLM (llama-server :8080, Qwen3.5-9B abliterated + SFT)
     │     → 스트리밍 JSON {"emotion": "sad", "reply": "어이구..."}
     │     → no-thinking 모드, 1~2문장 단위 청크 즉시 TTS로
     │
@@ -436,7 +439,7 @@ export HF_TOKEN="hf_..."
 | 서비스 | 내부 포트 | 타입 | 용도 |
 |---|---|---|---|
 | FastAPI 오케스트레이터 | 8000 | **TCP** | 메인 API + WebSocket |
-| llama-server (LLM) | 8001 | HTTP (내부) | LLM 추론 |
+| llama-server (LLM) | 8080 | HTTP (내부) | LLM 추론 |
 | faster-qwen3-tts (TTS) | 8002 | HTTP (내부) | TTS 합성 |
 | LiveKit (WebRTC) | 7880 | **TCP** | 실시간 오디오 전송 |
 
@@ -483,17 +486,19 @@ export_format: "q4_k_m"        # GGUF 변환
 llm:
   backend: "llama_server"       # llama.cpp llama-server
   model_path: "/workspace/models/llm_A/callone_A_q4_k_m.gguf"
-  port: 8001
+  port: 8080
   n_gpu_layers: 99
   flash_attn: true
   context: 8192
   enable_thinking: false
 
 tts:
-  backend: "qwen3_tts"          # faster-qwen3-tts
+  backend: "qwen3_tts"          # faster-qwen3-tts (FasterQwen3TTS.from_pretrained)
   model: "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
-  adapter_dir: "/workspace/models/tts_server/A"
-  lora_scale: 0.3               # 0.2 / 0.3 / 0.35 / 0.5 스윕 후 최적값
+  language: "Korean"            # 실 API 필수 인자
+  ref_wav: "data/speakers/A/ref_24k.wav"   # zero-shot 클론 참조(필수). 7~10초·24kHz·깨끗
+  ref_text: ""                  # 참조 WAV 의 실제 발화 텍스트
+  # ⚠️ faster_qwen3_tts 는 LoRA 미지원(adapter_dir/lora_scale 인자 없음) — 충실도 필요 시 Piper.
   chunk_size: 8                 # TTFA ~159ms
   port: 8002
 
@@ -527,7 +532,7 @@ Step 2. 모델 다운로드 (/workspace에 저장)
   huggingface-cli download [모델들]
 
 Step 3. llama-server 실행 (백그라운드)
-  ./llama-server -m callone_A_q4_k_m.gguf --port 8001 ...
+  ./llama-server -m callone_A_q4_k_m.gguf --port 8080 ...
 
 Step 4. faster-qwen3-tts 서버 실행 (백그라운드)
   python tts_stream.py --port 8002

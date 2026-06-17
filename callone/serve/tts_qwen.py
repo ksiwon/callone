@@ -1,12 +1,21 @@
 """Qwen3-TTS 1.7B 백엔드 (서버 GPU) — callone_stack_decision.md §2.
 
-faster_qwen3_tts.QwenTTS 래핑. 단일 모델에서 zero-shot 화자복제 + 자연어 instruct
-감정 제어를 **동시에** 받는다(§2-3). 화자 LoRA(models/tts_server/{spk}) 있으면 적용.
+faster_qwen3_tts.**FasterQwen3TTS** 래핑(실 API 검증 2026-06-17, andimarafioti/faster-qwen3-tts).
+단일 모델에서 zero-shot 화자복제(ref_audio) + 자연어 instruct 감정 제어를 **동시에** 받는다
+(generate_voice_clone_streaming 가 instruct 인자를 직접 지원 — §2-3).
+
+⚠️ 실 API 제약(웹검증 반영):
+  - 클래스는 FasterQwen3TTS, 생성은 `FasterQwen3TTS.from_pretrained(model_name, device, dtype)`.
+  - **LoRA 어댑터 미지원**(adapter_dir/lora_scale 인자 없음). 화자 충실도는 zero-shot 참조음성
+    품질로 결정 → ref_wav(7~10초, 24kHz, 깨끗) 필수. LoRA 충실도가 필요하면 Piper 학습본 사용.
+  - generate_voice_clone_streaming(text, language, ref_audio, ref_text, chunk_size, instruct)
+    → yield (np.ndarray, sr, timing_dict). language 필수(한국어="Korean").
+  - torch+CUDA 필요(CUDA graph). 서버(4090)엔 OpenVINO 없으니 torch OK. 노트북(Arc)은 Piper.
 
 인터페이스(다른 TTS 백엔드와 동일):
   - .sr                     출력 샘플레이트(24000)
-  - synth(text) -> (np, sr)
-  - synth_stream(text, chunk_ms=200, emotion=None) -> Iterator[np]
+  - synth(text, emotion=) -> (np, sr)
+  - synth_stream(text, chunk_ms=, emotion=) -> Iterator[np]
 
 미설치(faster_qwen3_tts 없음)/참조없음 → 예외 → orchestrator 가 piper/kokoro/placeholder 폴백.
 ⚠️ 로컬 가중치만. Alibaba 클라우드 보이스 API 금지(§2).
@@ -23,7 +32,7 @@ from ..common.logging import get_logger
 
 log = get_logger("tts_qwen")
 
-# §2-3 EMOTION_MAP — LLM 이 판단한 emotion 키 → 자연어 instruct
+# §2-3 EMOTION_MAP — LLM 이 판단한 emotion 키 → 자연어 instruct(generate 의 instruct 인자로 주입)
 EMOTION_MAP = {
     "happy":   "Speak with a bright, cheerful, and warm tone.",
     "sad":     "Speak with a low, slow, comforting, and sad tone.",
@@ -40,15 +49,25 @@ class QwenTTS:
         tcfg = load_config("tts_server")
         self.sr = int(tcfg.get("sample_rate", 24000))
         self.model_id = tcfg.get("model_id", "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
+        # language: 한국어 발화 → "Korean"(전체 영문명). "Auto" 도 가능.
+        self.language = str(scfg.get("language", tcfg.get("language", "Korean")))
         self.chunk_size = int(scfg.get("chunk_size", tcfg.get("inference", {}).get("chunk_size", 8)))
-        self.lora_scale = float(scfg.get("lora_scale",
-                                         tcfg.get("inference", {}).get("lora_scale", 0.3)))
+        self.device = str(scfg.get("device", tcfg.get("device", "cuda")))
+        self.dtype_name = str(tcfg.get("dtype", "bfloat16"))
         self.emotion_map = tcfg.get("emotion_instruct", EMOTION_MAP)
-        # 참조 음색(zero-shot): serve.tts.ref_wav/ref_text 또는 화자 ref 파일
+        # 참조 음색(zero-shot 클론의 핵심): serve.tts.ref_wav/ref_text 또는 화자 ref 파일
         self.ref_wav = scfg.get("ref_wav") or self._default_ref()
         self.ref_text = scfg.get("ref_text", "")
-        # 화자 LoRA 어댑터(학습본)
-        self.adapter_dir = Path(tcfg.get("output_dir", "models/tts_server")) / speaker
+        if not self.ref_wav:
+            raise RuntimeError(
+                f"Qwen3-TTS zero-shot 클론엔 참조 WAV 필수(화자={speaker}). "
+                f"data/speakers/{speaker}/ref_24k.wav 두거나 serve.yaml tts.ref_wav 지정. "
+                f"미지정 시 orchestrator 가 Piper 폴백.")
+        # ⚠️ faster_qwen3_tts 는 LoRA 미지원 — 학습 어댑터가 있어도 서빙엔 못 붙음(Piper 사용 권장).
+        adapter = Path(tcfg.get("output_dir", "models/tts_server")) / speaker
+        if adapter.exists():
+            log.warning("화자 LoRA(%s) 존재하나 faster_qwen3_tts 는 어댑터 미지원 → zero-shot 참조로만 합성. "
+                        "LoRA 충실도가 필요하면 TTS 백엔드를 Piper 로.", adapter)
         self._tts = self._load()
 
     def _default_ref(self) -> str:
@@ -60,19 +79,17 @@ class QwenTTS:
 
     def _load(self):
         try:
-            from faster_qwen3_tts import QwenTTS as _Q  # type: ignore
+            import torch  # CUDA graph 백엔드라 torch 필수
+            from faster_qwen3_tts import FasterQwen3TTS  # type: ignore
         except Exception as e:  # noqa: BLE001
             raise RuntimeError(
-                f"faster_qwen3_tts 미설치({e}). pip install faster-qwen3-tts "
-                f"(GPU 노드). 미설치 시 orchestrator 가 piper/kokoro 폴백.") from e
-        kwargs = {"model_name": self.model_id}
-        if self.adapter_dir.exists():
-            kwargs["adapter_dir"] = str(self.adapter_dir)
-            kwargs["lora_scale"] = self.lora_scale
-            log.info("Qwen3-TTS LoRA 적용: %s (scale=%.2f)", self.adapter_dir, self.lora_scale)
-        tts = _Q(**kwargs)
-        log.info("Qwen3-TTS 로드: %s (sr=%d, speaker=%s, ref=%s)",
-                 self.model_id, self.sr, self.speaker, self.ref_wav or "(없음)")
+                f"faster_qwen3_tts/torch 미설치({e}). pip install faster-qwen3-tts "
+                f"(torch>=2.5.1 + NVIDIA CUDA). 미설치 시 orchestrator 가 piper/kokoro 폴백.") from e
+        dtype = getattr(torch, self.dtype_name, torch.bfloat16)
+        tts = FasterQwen3TTS.from_pretrained(self.model_id, device=self.device, dtype=dtype)
+        log.info("Qwen3-TTS 로드: %s (device=%s, dtype=%s, sr=%d, speaker=%s, ref=%s, lang=%s)",
+                 self.model_id, self.device, self.dtype_name, self.sr, self.speaker,
+                 self.ref_wav, self.language)
         return tts
 
     def _instruct(self, emotion: str | None) -> str:
@@ -85,10 +102,12 @@ class QwenTTS:
             return
         instruct = self._instruct(emotion)
         try:
-            for chunk in self._tts.generate_voice_clone_streaming(
-                    text=text, ref_audio_path=self.ref_wav, ref_text=self.ref_text,
-                    instruct_text=instruct, chunk_size=self.chunk_size):
-                yield np.asarray(chunk, dtype=np.float32)
+            for audio_chunk, sr, _timing in self._tts.generate_voice_clone_streaming(
+                    text=text, language=self.language,
+                    ref_audio=self.ref_wav, ref_text=self.ref_text,
+                    chunk_size=self.chunk_size, instruct=instruct):
+                self.sr = int(sr)  # 모델이 알려주는 실제 sr 로 갱신
+                yield np.asarray(audio_chunk, dtype=np.float32)
         except Exception as e:  # noqa: BLE001
             log.warning("Qwen3-TTS 스트림 오류(%s)", e)
 
