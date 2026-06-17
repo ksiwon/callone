@@ -179,7 +179,10 @@ def build() -> gr.Blocks:
 def main() -> None:
     demo = build()
     port = int(os.environ.get("PORT", "50000"))
-    demo.launch(server_name="0.0.0.0", server_port=port, share=False)
+    # GRADIO_SHARE=1 이면 gradio 공개 링크(*.gradio.live) 생성 — RunPod 등 원격에서
+    # 포트 노출/재시작 없이 브라우저+마이크 접속(HTTPS 라 마이크 권한 OK).
+    share = os.environ.get("GRADIO_SHARE", "0").lower() in ("1", "true", "yes")
+    demo.launch(server_name="0.0.0.0", server_port=port, share=share)
 
 
 if __name__ == "__main__":

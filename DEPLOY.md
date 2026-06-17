@@ -101,8 +101,11 @@ export COSYVOICE_MODEL_DIR=/path/to/pretrained_models/Fun-CosyVoice3-0.5B
 cd callone
 python -m studio                              # http://0.0.0.0:50000
 # 포트 바꾸기: PORT=7000 python -m studio
+# 원격(RunPod 등) 브라우저+마이크 — 포트 노출/재시작 없이 공개 HTTPS 링크:
+GRADIO_SHARE=1 python -m studio               # 출력의 https://....gradio.live 열기
 ```
 헤더에서 [환경=GPU] [목적] [데이터모드] 고르면 끝. 배지에 🟢/🟡 표시.
+통화칸: 상대 화자 ID(제로샷은 학습본과 다른 ID), 페르소나·상황 입력 → 마이크.
 
 ### 3-2-B. callone-serve 풀 실시간 (대안)
 ```bash
@@ -159,7 +162,11 @@ curl http://127.0.0.1:8080/v1/chat/completions -H "Content-Type: application/jso
 | TTS 칸 🟡 (Qwen3-TTS) | faster-qwen3-tts 미설치 | `pip install faster-qwen3-tts` (또는 piper 폴백) |
 | 제로샷 TTS 🟡 (CosyVoice) | repo/가중치 없음 | `voice_clone/*/setup.sh` + `COSYVOICE_MODEL_DIR` |
 | CosyVoice 중국어로 새어나옴 | zero-shot 언어 디폴트 버그 | 참조 **한국어 prompt_text** 정확히 입력 |
-| LLM 응답 앞에 `<think>` 지연 | Qwen3.5 thinking 기본 ON | `enable_thinking:false`(코드/서버에서 처리됨) |
+| LLM content 빈데 reasoning_content만 참 | Qwen3.5 thinking 기본 ON | `chat_template_kwargs.enable_thinking:false`(코드 처리) 또는 서버 `--reasoning-budget 0` |
+| `hf_transfer` ModuleNotFound (모델 다운) | 베이스 이미지 `HF_HUB_ENABLE_HF_TRANSFER=1` | `pip install hf_transfer` (또는 `export HF_HUB_ENABLE_HF_TRANSFER=0`) |
+| TTS `ref_text is required ... ICL mode` | Qwen3-TTS 클론은 참조 전사 필수 | `data/speakers/{spk}/ref_text.txt`(large-v3 전사) 두기 — 없으면 자동전사 폴백(품질↓) |
+| TTS 톤 끊김/흔들림 | chunk_size 작음·temperature 높음 | `chunk_size:25` + `temperature:0.5`(코드 기본, 실측 최적) |
+| 통화 톤이 항상 neutral | base LLM이 감정 라벨 안 냄 | `tts.emotion:true` 면 orchestrator 가 LLM 감정라벨링 자동 on |
 | 통화 응답이 단순/엉뚱 | 모델 미준비 → PersonaLLM 폴백 | llama-server 띄우고 `serve.yaml llm.backend=llama` |
 | MoE 4bit 학습 에러 | bitsandbytes MoE 4bit 버그 | `load_in_4bit:false`(bf16 LoRA, 기본값) |
 

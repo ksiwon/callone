@@ -1,81 +1,99 @@
-# RunPod RTX 4090 — 실시간 음성 통화 실행 순서 (확정판)
+# RunPod GPU — 실시간 음성 통화 실행 순서 (검증 확정판, 2026-06-17 실측)
 
 > 켜자마자 **위에서 아래로 그대로** 복붙. 각 단계 끝 **✅ 체크**가 통과해야 다음으로.
-> 싼 단계(설치·헬스)부터 검증 → 비싼 GPU 시간 낭비 방지. 음성 통화만(토킹헤드·학습 제외).
-> 근거/대안은 [DEPLOY.md](../DEPLOY.md), 모델결정 [callone_stack_decision.md](../callone_stack_decision.md).
+> 싼 단계(설치·헬스)부터 → 비싼 GPU 시간 낭비 방지. 음성 통화만(토킹헤드·학습 제외).
+> 이 문서는 **실제로 4090/3090 24GB에서 관통 검증한 순서**다. 근거/대안은 [DEPLOY.md](../DEPLOY.md).
 
-전제: 음성 LoRA/페르소나는 A100에서 이미 끝났거나, **base 9B+페르소나로 바로 통화**(학습 없이 동작).
+전제: 학습 없이 **base 9B + 페르소나(+제로샷 음색)로 바로 통화** 동작 확인됨. (LoRA/페르소나 학습본 있으면 더 진해짐.)
 
 ---
 
-## 0. Pod 생성 (RunPod 콘솔, UI)
-- GPU: **RTX 4090 24GB** / Template: PyTorch(CUDA 12.x) / **Volume 100GB+ 를 `/workspace` 에 마운트**.
-- **Expose TCP Ports: `8000`**(callone-serve) **, `50000`**(studio). HTTP 아닌 **TCP** 로(저지연).
-- ⚠️ TCP 포트번호는 START마다 **새로 배정** → 클라이언트 주소는 그때 콘솔 Connect 에서 확인.
+## 0. Pod 생성 (RunPod 콘솔)
+- GPU: **RTX 4090** 권장. 매진 시 **RTX 3090 / 3090 Ti(24GB)** 도 OK(메모리대역폭 비슷 → 토큰생성 속도 거의 동급, prefill만 약간 느림). **24GB VRAM 필수**(16GB 비추).
+  - Community Cloud = 절반 가격(4090 ~$0.34/hr). 매진 잦음 → 24GB 아무거나 available 한 것.
+- 템플릿: **순정 PyTorch (CUDA 12.x~13.x)**. ComfyUI/AI-Rebels 류 금지. (CUDA 13 베이스라도 우리 torch는 cu124로 동작 확인.)
+- 디스크: **Container 30GB**(이미지용, 줄이면 안 뜸) + **Volume 40~50GB**(`/workspace`, 실사용 ~25GB).
+- 포트 노출은 **선택** — 아래 9번에서 **gradio 공개 링크(GRADIO_SHARE)** 로 접속하면 RunPod 포트 설정·재시작 불필요.
+- 접속: Pod Running → **Connect → JupyterLab(8888)** 또는 **Web terminal**(SSH키 불필요).
 
 ---
 
 ## 1. 코드 + 환경변수
 ```bash
 cd /workspace
-git clone <your-repo> callone && cd callone     # 또는 로컬 업로드(.venv/.git 제외)
+git clone https://github.com/ksiwon/callone.git && cd callone
 
 export HF_HOME=/workspace/hf_cache              # 모델 캐시 → Stop/Start 유지
-export CALLONE_TIER=server_gpu                  # GPU 강제(자동감지 대신 명시)
+export CALLONE_TIER=server_gpu                  # GPU 강제
 echo 'export HF_HOME=/workspace/hf_cache'   >> ~/.bashrc
 echo 'export CALLONE_TIER=server_gpu'       >> ~/.bashrc
 ```
-> HF_TOKEN 불필요(9B GGUF·Qwen3-TTS·whisper 전부 비게이트). 게이트 모델 쓸 때만 `export HF_TOKEN=hf_...`.
+> HF_TOKEN 불필요(9B GGUF·Qwen3-TTS·whisper 전부 비게이트).
 
 ---
 
-## 2. 서빙 환경 설치 (서빙 전용 venv — heavy 와 분리)
+## 2. 서빙 환경 설치 (서빙 전용 venv — heavy 와 절대 분리)
 ```bash
 bash scripts/setup_serve_gpu.sh                 # ffmpeg→.venv-serve→torch(cu124)→faster-whisper+faster-qwen3-tts→numpy<2.4
-# CUDA 다르면:  CUDA_INDEX=https://download.pytorch.org/whl/cu121 bash scripts/setup_serve_gpu.sh
 source .venv-serve/bin/activate
 ```
-✅ **체크:** 스크립트 끝의 `pip check` 통과 + `transformers 4.57.3` 표시. (충돌 나면 여기서 멈추고 해결 — GPU 안 씀)
+✅ **체크:** 끝에 `No broken requirements found` + 버전표에 **`transformers 4.57.3`**, `torch 2.x+cu124`, `faster-qwen3-tts 0.2.6`.
+> CUDA 13 베이스에서 cu124 torch 정상. 혹시 torch import 에러면: `rm -rf .venv-serve && CUDA_INDEX=https://download.pytorch.org/whl/cu128 bash scripts/setup_serve_gpu.sh`
 
 ---
 
-## 3. llama.cpp 빌드 (LLM 서버 바이너리)
+## 3. llama.cpp 빌드 (LLM 서버 바이너리, CUDA)
 ```bash
+nvcc --version                                  # CUDA 컴파일러 확인(없으면 runtime 이미지 → 프리빌트 필요)
 bash scripts/build_llama_cuda.sh                # → /workspace/llama.cpp/build/bin/llama-server
 ```
-✅ **체크:** 마지막에 `✅ 빌드 완료: .../llama-server` 출력.
+✅ **체크:** `✅ 빌드 완료: /workspace/llama.cpp/build/bin/llama-server`
 
 ---
 
 ## 4. 모델 다운로드 (`/workspace` → Stop/Start 유지)
 ```bash
-# 4-1. LLM: Qwen3.5-9B uncensored aggressive GGUF (Q4_K_M, 5.3GB)
+pip install hf_transfer                          # ⚠️ 베이스 이미지가 HF_HUB_ENABLE_HF_TRANSFER=1 → 이거 없으면 다운로드 에러
+
+# 4-1. LLM: 9B uncensored aggressive GGUF (Q4_K_M, 5.3GB)
 huggingface-cli download HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive \
   --include "*Q4_K_M*.gguf" --local-dir /workspace/models/llm_A
 
-# 4-2. TTS: Qwen3-TTS 1.7B Base (4.54GB, Apache2.0 비게이트)
+# 4-2. TTS: Qwen3-TTS 1.7B Base (4.5GB, 비게이트)
 huggingface-cli download Qwen/Qwen3-TTS-12Hz-1.7B-Base \
   --local-dir /workspace/models/qwen3_tts
+
+# TTS 모델을 로컬 다운본으로 지정(재다운로드 방지). repo config 는 HF id 유지 → git pull 충돌 없음.
+export CALLONE_TTS_MODEL=/workspace/models/qwen3_tts
+echo 'export CALLONE_TTS_MODEL=/workspace/models/qwen3_tts' >> ~/.bashrc
 ```
-✅ **체크:**
-```bash
-ls -lh /workspace/models/llm_A/*Q4_K_M*.gguf      # 5.3GB 파일 1개
-ls /workspace/models/qwen3_tts                    # config/모델 파일 존재
-```
+✅ **체크:** `ls -lh /workspace/models/llm_A/*Q4_K_M*.gguf` (5.3GB 1개) + `ls /workspace/models/qwen3_tts` (config/model.safetensors 등)
 
 ---
 
-## 5. 화자 참조 음성 (Qwen3-TTS 클론 필수입력)
-Qwen3-TTS는 **zero-shot 참조음성**으로 음색을 만든다. 화자당 깨끗한 **7~10초·24kHz·모노** 클립 1개 필요.
-```bash
-mkdir -p data/speakers/A
-# 깨끗한 발화 wav 하나를 24kHz 모노로 변환(8초 예시). <clean.wav> = 잡음없는 화자 A 단독 발화.
-ffmpeg -y -i <clean.wav> -ac 1 -ar 24000 -t 8 data/speakers/A/ref_24k.wav
-```
-- 코드가 `data/speakers/A/ref_24k.wav` 를 **자동 인식**(serve.yaml 수정 불필요).
-- (선택) 참조 발화의 실제 텍스트를 알면 품질↑: `configs/serve.yaml` 의 `tts.ref_text` 에 정확히 입력.
+## 5. 화자 참조 음성 + ref_text (제로샷 클론 필수)
+Qwen3-TTS는 **참조음성(7~10초·깨끗) + 그 전사(ref_text)** 로 음색을 만든다(ICL 모드 → ref_text 필수).
+> ⚠️ **화자 ID 규칙:** 학습본(예: 엄마=`A`)과 제로샷 테스트는 **다른 ID**로. 여기선 예시로 `sis`.
+> 참조 클립은 git 에 없으니(개인 음성) **JupyterLab 드래그 업로드** 또는 runpodctl 로 올린다.
 
-✅ **체크:** `ls -lh data/speakers/A/ref_24k.wav` (수백 KB, ~8초).
+```bash
+apt-get install -y sox >/dev/null 2>&1          # qwen-tts 오디오 처리(경고 제거)
+mkdir -p data/speakers/sis
+# 업로드한 깨끗한 클립 → 24kHz 모노 변환(앞 10초)
+ffmpeg -y -i data/speakers/sis/Record.wav -ac 1 -ar 24000 -t 10 data/speakers/sis/ref_24k.wav
+
+# ref_text 저장(large-v3 = 정확. 이게 품질 큰 영향). 있으면 자동전사 안 타고 이걸 씀.
+python - <<'PY'
+from faster_whisper import WhisperModel
+m=WhisperModel("large-v3",device="cuda",compute_type="float16")
+segs,_=m.transcribe("data/speakers/sis/ref_24k.wav",language="ko")
+open("data/speakers/sis/ref_text.txt","w",encoding="utf-8").write("".join(s.text for s in segs).strip())
+print("ref_text.txt saved")
+PY
+```
+✅ **체크:** `ls data/speakers/sis/` → `ref_24k.wav` + `ref_text.txt`
+> ref_text.txt 없으면 코드가 자동전사(small)로 폴백하나 품질↓ → **large-v3 ref_text.txt 권장.**
+> 품질 튜닝은 코드에 박힘: `chunk_size=25` + `temperature=0.5`(실측 최적: 8/0.9는 끊김·흔들림).
 
 ---
 
@@ -86,69 +104,111 @@ nohup /workspace/llama.cpp/build/bin/llama-server \
   --host 127.0.0.1 --port 8080 \
   -c 8192 -n 512 --n-gpu-layers 99 \
   > /workspace/llama.log 2>&1 &
-sleep 8
-# (속도 옵션, 선택) 위 명령이 잘 뜨면 다음 기동부터 `--flash-attn on` 추가.
-#   ⚠️ 최신 빌드는 값 인자(on|off|auto) — bare `--flash-attn` 는 에러날 수 있어 기본에선 뺐다.
+sleep 15
+curl -s http://127.0.0.1:8080/health ; echo
 ```
-✅ **체크(둘 다):**
+✅ **체크:** `{"status":"ok"}`. 그다음 thinking 끈 생성(우리 코드가 보내는 방식과 동일):
 ```bash
-curl -s http://127.0.0.1:8080/health                                  # {"status":"ok"}
 curl -s http://127.0.0.1:8080/v1/chat/completions -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"안녕"}],"max_tokens":32}'   # 한국어 응답
+  -d '{"messages":[{"role":"user","content":"엄마 나 왔어"}],"max_tokens":64,"chat_template_kwargs":{"enable_thinking":false}}' ; echo
 ```
-> 실파일명은 `ls /workspace/models/llm_A/` 로 확인해 맞춰라(repo가 파일명 바꿨을 수 있음).
+→ `content` 에 **한국어 답변**이 차야 정상. (이 모델 thinking 기본 ON — `enable_thinking:false` 없으면 `reasoning_content` 로만 가고 content 빈다. 우리 LLM 코드는 이미 false 로 보냄. 서버 자체를 끄려면 `--reasoning-budget 0` 추가 기동.)
+> 속도 옵션(선택): 잘 뜨면 다음 기동부터 `--flash-attn on`(bare `--flash-attn`는 최신 빌드서 에러).
 
 ---
 
-## 7. TTS 단독 검증 (5번 ref + 모델 + 패키지 한 번에 확인)
+## 7. TTS 단독 검증 (warm 지연 = 통화 TTS 몫)
 ```bash
 python - <<'PY'
-import numpy as np, soundfile as sf
+import time, numpy as np, soundfile as sf
 from callone.serve.tts_qwen import QwenTTS
-tts = QwenTTS("A")                                  # ref_24k.wav 자동 인식
-y = np.concatenate(list(tts.synth_stream("안녕하세요. 잘 지냈어요?", emotion="happy")))
+tts = QwenTTS("sis")                              # cs=25·temp=0.5·ref_text.txt·env모델 자동
+print(f"chunk_size={tts.chunk_size} temperature={tts.temperature} ref_text={tts.ref_text[:25]!r}")
+def run(txt,tag):
+    t=time.time(); first=None; ch=[]
+    for i,c in enumerate(tts.synth_stream(txt, emotion="neutral")):
+        if i==0: first=time.time()-t
+        ch.append(c)
+    print(f"[{tag}] 첫청크 {first:.2f}s"); return np.concatenate(ch)
+run("워밍업.","warmup")                            # CUDA 그래프 캡처(1회성 ~5s, 버림)
+y=run("안녕하세요. 잘 지냈어요? 오랜만이에요.","warm")
 sf.write("/workspace/tts_test.wav", y, tts.sr); print("OK", y.shape, tts.sr)
 PY
 ```
-✅ **체크:** `OK (N,) 24000` 출력 + `/workspace/tts_test.wav` 생성(들어보면 화자 음색).
-> 실패해 Piper 폴백 로그가 뜨면: faster-qwen3-tts 설치/ref_wav/CUDA 중 하나 — 메시지대로 처리(아직 통화 안 켰으니 비용 적음).
+✅ **체크:** `chunk_size=25 temperature=0.5` + `[warm] 첫청크 ~0.5~0.7s` + `tts_test.wav`(화자 음색).
+> 워밍업 첫 실행만 ~5s(그래프 캡처). 서버는 한 번 뜨면 계속 warm.
 
 ---
 
-## 8. 앱 기동 (택1)
+## 8. 전체 파이프라인 관통 (ASR→LLM→TTS, 마이크 없이)
+참조 클립을 "들어온 말"로 넣어 한 턴 돌린다.
 ```bash
-# A) studio 통합 앱(데모·턴제 통화, 가장 간단)
-PORT=50000 python -m studio        # http://0.0.0.0:50000
+# ① 감정이 문맥 따라 바뀌나 (LLM 단독)
+python - <<'PY'
+from callone.serve.llama_llm import LlamaPersonaLLM
+llm = LlamaPersonaLLM("sis", use_rag=False); llm.set_emotion_labeling(True)
+llm.set_context(persona="너는 사용자의 친한 여동생이야. 항상 반말로 짧게.", situation="")
+for msg in ["나 오늘 승진했어!","할머니가 편찮으셔서 걱정돼.","왜 전화 안 받았어 진짜."]:
+    print(msg,"→",llm.chat(msg)[:90])
+PY
+# → 각 응답 앞 [emotion:happy/sad/...] 가 문맥 맞게 붙으면 OK
 
-# B) callone-serve 풀 실시간(WebSocket, barge-in) + UI
-callone-serve                      # FastAPI :8000
-#   (UI 쓰려면 별 터미널)  cd ui && npm install && npm run dev   # :5173
+# ② 전체 한 턴 (ASR→LLM→TTS→음성)
+python - <<'PY'
+import numpy as np, soundfile as sf
+from callone.serve.orchestrator import Orchestrator
+orch = Orchestrator("sis")
+orch.set_context(persona="너는 사용자의 친한 여동생이야. 항상 반말로 짧고 자연스럽게.",
+                 situation="오랜만에 오빠한테 전화가 왔다.")
+audio, sr = sf.read("data/speakers/sis/ref_24k.wav")
+if getattr(audio,"ndim",1)>1: audio=audio.mean(1)
+orch.handle_utterance(audio.astype("float32"), sr)            # 워밍업
+turn = orch.handle_utterance(audio.astype("float32"), sr)     # 측정
+print("내 말(ASR):", turn.user_text)
+print("클론 응답 :", turn.reply_text)
+print("첫음성 지연: %.0f ms" % turn.first_audio_latency_ms)
+sf.write("/workspace/call_reply.wav", np.concatenate(turn.audio_chunks), orch.tts.sr)
+PY
 ```
-✅ **체크:** `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:50000/` → `200`
-(B면 `http://127.0.0.1:8000/api/health` → `{"status":"ok"}`)
+✅ **체크:** ①감정 태그 문맥별 변화 + ②`call_reply.wav`(화자 음색·문맥 톤).
+> 지연 주의: 위 측정은 **11초 클립**을 ASR 하느라 부풀려짐(~2.3s). 실제 통화는 짧게 말하니 **첫음성 ~1.2~1.5s**.
+> 감정→톤: TTS 감정 켜지면(serve.yaml `tts.emotion:true`) orchestrator 가 LLM 감정라벨링 자동 on → 톤 동적 변화.
 
 ---
 
-## 9. 외부 접속 + 통화 테스트
-- RunPod 콘솔 **Connect → TCP 포트 매핑** 확인(8000/50000 의 외부 host:port).
-- 브라우저로 그 주소 접속 → 마이크 한마디 → 화자 음색 응답.
-✅ **목표:** 첫 음성 < 1.2초(예산 ~0.8초). studio 통화칸 상태에 `첫음성 …ms` 표시.
+## 9. 브라우저 마이크 실시간 통화 (studio)
+RunPod 포트 설정/재시작 없이 **gradio 공개 링크**로 바로:
+```bash
+GRADIO_SHARE=1 python -m studio                   # 출력의 https://....gradio.live 링크 열기
+```
+→ 브라우저에서 그 링크 → **통화 패널**: `상대 화자 ID = sis`, 페르소나·상황 입력 → 마이크로 한마디 → 멈춤 → 📞 보내기.
+✅ 화자 음색 + 문맥 톤 응답. 상태에 `첫음성 …ms` 표시.
+> 포트로 직접 쓰려면(대안): Pod에 50000 노출 후 `PORT=50000 python -m studio` → RunPod Connect 의 50000 주소.
+> 풀 실시간(WebSocket·barge-in)은 `callone-serve`(:8000) + `ui`(:5173).
 
 ---
 
-## 통화 품질 올리기 (선택, 통화 된 다음)
-- **페르소나/RAG:** `data/speakers/A/` 에 profile.json + utterances(말투·기억) 두면 system 주입으로 진해짐.
-- **LoRA 진한 말투:** A100에서 만든 화자 GGUF(병합본)를 6번 `-m` 으로 교체.
-- **감정:** LLM이 emotion 키 내면 TTS instruct 자동 주입(이미 코드 처리). 평소 통화는 그대로 OK.
+## 통화 품질 올리기 (선택)
+- **페르소나:** studio 통화칸 페르소나/상황을 구체적으로(예 "항상 반말, 오빠라고 불러"). base 모델 호칭/말투 흔들림 잡힘.
+- **학습본 음색(최고):** A100에서 만든 화자 LoRA→GGUF 병합본을 6번 `-m` 으로 교체(말투 내재화). 음색은 Piper 학습본이 제로샷보다 충실.
+- **데이터/RAG:** `data/speakers/{spk}/` 에 profile.json + utterances 두면 기억·말투 진해짐.
 
-## 막힐 때 (전부 코드에 폴백 박힘)
+## 막힐 때 (실측 함정 + 해결)
 | 증상 | 위치 | 처리 |
 |---|---|---|
-| 설치 transformers 충돌 | 2번 | heavy venv 와 섞였는지 확인. `.venv-serve` 단독 재설치 |
-| llama-server health 무응답 | 6번 | `cat /workspace/llama.log` — VRAM/파일명/포트 |
-| TTS가 Piper로 폴백 | 7번 | faster-qwen3-tts 미설치 or ref_24k.wav 없음 or CUDA |
-| ASR 빈 전사 | 통화 | ct2/cuDNN 불일치 → 코드가 CPU int8 자동 폴백(로그 확인) |
-| 통화 응답 단순/엉뚱 | 통화 | llama-server 안 떠서 PersonaLLM 폴백 → 6번 재확인 |
+| `hf_transfer` ModuleNotFound | 4번 | `pip install hf_transfer` (또는 `export HF_HUB_ENABLE_HF_TRANSFER=0`) |
+| transformers 충돌 | 2번 | heavy venv 와 섞였는지. `.venv-serve` 단독(transformers 4.57.3) |
+| llama 응답 content 빈데 reasoning_content만 참 | 6번 | thinking ON. `chat_template_kwargs.enable_thinking=false`(코드 처리) 또는 서버 `--reasoning-budget 0` |
+| TTS `ref_text is required ... ICL mode` | 5/7번 | ref_text.txt 두기(large-v3 전사) — ICL 필수 |
+| TTS 톤 끊김/흔들림 | 7번 | chunk_size=25·temperature=0.5(코드 기본). 더 매끄럽게는 cs=40(지연↑) |
+| `sox not found` 경고 | 5번 | `apt-get install -y sox` (경고일 뿐, 무시 가능) |
+| TTS가 Piper로 폴백 | 7번 | faster-qwen3-tts 미설치 / ref 없음 / CUDA |
+| ASR 빈 전사 | 8/9번 | ct2/cuDNN 불일치 → 코드가 CPU int8 자동 폴백(로그 확인) |
+| 통화 응답 단순/엉뚱 | 8/9번 | llama-server 안 떠서 PersonaLLM 폴백 → 6번 health 재확인 |
+| gradio 링크 마이크 안 됨 | 9번 | gradio.live 는 HTTPS라 OK. 브라우저 마이크 권한 허용 확인 |
 
-## Stop 전
-- 모델은 `/workspace` 라 유지. 코드 변경은 `git push`. 다음 START 때 **TCP 포트 재배정** → 9번 주소만 갱신.
+## Stop / 재시작
+- 모델·venv·코드 전부 `/workspace` → **Stop 후에도 유지**. 재접속 시 `source .venv-serve/bin/activate` 만.
+- llama-server 는 Stop 시 죽음 → 재시작 후 **6번 재기동**. `~/.bashrc` 의 env(HF_HOME/CALLONE_TIER/CALLONE_TTS_MODEL)는 새 셸에서 자동.
+- 코드 변경은 `git pull`(로컬 수정 있으면 `git checkout <file>` 후). 며칠 안 쓰면 Terminate(디스크 0, 다음에 이 문서 1번부터 ~30분 복구).
+```
