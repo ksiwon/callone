@@ -46,6 +46,7 @@ class LlamaPersonaLLM:
         self.persona = load_persona(speaker)
         self._persona_override: str | None = None   # 통화 시 주입(이 사람은 누구)
         self._situation: str | None = None          # 통화 시 주입(지금 상황)
+        self._emotion_labels = False                 # True 면 응답 앞에 [emotion:..] 출력 지시
         self._rag = None
         if use_rag:
             try:
@@ -76,6 +77,12 @@ class LlamaPersonaLLM:
         self._persona_override = persona
         self._situation = situation
 
+    def set_emotion_labeling(self, on: bool = True):
+        """감정 라벨 출력 on/off. orchestrator 가 TTS 감정 활성 시 켠다.
+        켜지면 응답 맨 앞 [emotion:..] → _parse_emotion 이 추출·제거 → TTS instruct 동적 주입.
+        """
+        self._emotion_labels = bool(on)
+
     # ----- 메시지 조립 ----------------------------------------------------
     def _system(self, user_text: str) -> str:
         # persona_override 있으면 학습 페르소나 대체(통화 시 "이 사람은 누구").
@@ -94,6 +101,10 @@ class LlamaPersonaLLM:
             except Exception:  # noqa: BLE001
                 pass
         sys += "\n전화 통화처럼 1~2문장으로 짧고 자연스럽게 답한다."
+        if self._emotion_labels:
+            # 응답 맨 앞에 감정 태그 1개. _parse_emotion 이 추출·제거 → TTS 톤 동적 변화.
+            sys += ("\n응답 맨 앞에 지금 감정을 [emotion:happy|sad|angry|neutral|excited] "
+                    "중 하나로 딱 붙여라(은은하게). 예: '[emotion:happy] 어, 왔나!'")
         return sys
 
     def _messages(self, user_text: str, history: list[dict] | None) -> list[dict]:

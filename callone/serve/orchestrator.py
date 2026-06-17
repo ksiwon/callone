@@ -160,6 +160,11 @@ class Orchestrator:
         self.asr = StreamASR(cfg.get("asr", {}))
         self.llm = _pick_llm(speaker, cfg)
         self.tts = _pick_tts(speaker, cfg)
+        # TTS 감정 활성 시 LLM 이 [emotion:..] 라벨을 내도록(문맥→톤 변화). 백엔드가 지원할 때만.
+        if bool((cfg.get("tts", {}) or {}).get("emotion", True)):
+            fn = getattr(self.llm, "set_emotion_labeling", None)
+            if callable(fn):
+                fn(True)
         self.history: list[dict] = []
         self._interrupt = threading.Event()
 
