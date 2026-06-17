@@ -32,6 +32,10 @@ llm:
   top_p: 0.8
   top_k: 20
   max_new_tokens: 64           # 전화 턴 짧게(LoRA 가 길게 주절거리는 것 캡)
+  # 통화 맥락 누적: LLM 에 넘길 최근 메시지 수(=N/2턴). 24=12턴. 통화가 길게 이어져도
+  # 앞 맥락 기억. RAG off(시스템 프롬프트 고정)면 llama.cpp prefix 캐시로 길어도 저렴 →
+  # 더 길게(40~) 가능. RAG on 이면 매 턴 시스템이 바뀌어 캐시 깨지니 과하게 키우지 말 것.
+  max_history: 24
 tts:
   backend: qwen3-tts           # §2: Qwen3-TTS 1.7B(감정 instruct 통합). 미설치 시 piper/kokoro 폴백
   stream: true

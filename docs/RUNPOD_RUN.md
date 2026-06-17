@@ -174,6 +174,23 @@ PY
 > 지연 주의: 위 측정은 **11초 클립**을 ASR 하느라 부풀려짐(~2.3s). 실제 통화는 짧게 말하니 **첫음성 ~1.2~1.5s**.
 > 감정→톤: TTS 감정 켜지면(serve.yaml `tts.emotion:true`) orchestrator 가 LLM 감정라벨링 자동 on → 톤 동적 변화.
 
+### 8-1. 멀티턴 맥락 누적 확인 (통화가 앞 대화를 기억하나)
+orchestrator(또는 studio 의 화자별 캐시)는 한 세션 내내 `history` 를 쌓고, LLM 에 **최근
+`llm.max_history` 개 메시지(기본 24=12턴)** 를 넘긴다 → 앞 맥락 기억.
+```bash
+python - <<'PY'
+from callone.serve.llama_llm import LlamaPersonaLLM
+llm = LlamaPersonaLLM("sis", use_rag=False)
+llm.set_context(persona="너는 사용자의 친한 여동생이야. 항상 반말로 짧게.", situation="")
+hist=[]
+def turn(u):
+    r="".join(llm.chat_stream(u, hist)); hist.append({"role":"user","content":u}); hist.append({"role":"assistant","content":r}); print(u,"→",r[:70])
+turn("나 내일 부산 내려가서 3일 있을 거야.")
+turn("내가 어디 간다고 했지?")          # ← '부산' 을 기억하면 맥락 누적 OK
+PY
+```
+✅ 둘째 답에 **부산/3일** 류가 나오면 누적 맥락 작동. (창 더 넓히려면 `serve.yaml llm.max_history`↑ — RAG off 면 prefix 캐시로 길어도 저렴.)
+
 ---
 
 ## 9. 브라우저 마이크 실시간 통화 (studio)

@@ -36,12 +36,16 @@ class LlamaPersonaLLM:
     def __init__(self, speaker: str, base_url: str = "http://127.0.0.1:8080",
                  max_new_tokens: int = 80, temperature: float = 0.7,
                  use_rag: bool = True, timeout: float = 60.0,
-                 probe: bool = True, rag_cfg: dict | None = None):
+                 probe: bool = True, rag_cfg: dict | None = None,
+                 max_history: int = 24):
         self.speaker = speaker
         self.base_url = base_url.rstrip("/")
         self.url = f"{self.base_url}/v1/chat/completions"
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
+        # 통화 맥락 누적: 최근 N개 메시지(=N/2턴)를 LLM 에 전달. 시스템 프롬프트가
+        # 고정(RAG off)이면 llama.cpp prefix 캐시가 먹어 길어도 추가비용 적음.
+        self.max_history = int((rag_cfg or {}).get("max_history", max_history))
         self.timeout = timeout
         self.persona = load_persona(speaker)
         self._persona_override: str | None = None   # 통화 시 주입(이 사람은 누구)
@@ -109,7 +113,7 @@ class LlamaPersonaLLM:
 
     def _messages(self, user_text: str, history: list[dict] | None) -> list[dict]:
         msgs = [{"role": "system", "content": self._system(user_text)}]
-        msgs += list(history or [])[-8:]
+        msgs += list(history or [])[-self.max_history:]   # 통화 맥락 누적(최근 max_history 개)
         msgs.append({"role": "user", "content": user_text})
         return msgs
 
