@@ -53,13 +53,17 @@ PY
 
 cat <<'EOF'
 
-=== 준비 완료 — 다음 순서 ===
+=== 준비 완료 — 다음 순서 (자세히는 docs/RUNPOD_RUN.md) ===
+  ※ $CALLONE_HOME = 영속 폴더(RunPod=/workspace, Elice 등=$HOME). 먼저 잡아라:
+    if [ -w /workspace ]; then export CALLONE_HOME=/workspace; else export CALLONE_HOME=$HOME; fi
   1) LLM 모델:  huggingface-cli download HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive \
-                  --local-dir /workspace/models/llm_A --include "*Q4_K_M*.gguf"
+                  --local-dir $CALLONE_HOME/models/llm_A --include "*Q4_K_M*.gguf"
   2) TTS 모델:  huggingface-cli download Qwen/Qwen3-TTS-12Hz-1.7B-Base \
-                  --local-dir /workspace/models/qwen3_tts        # Apache2.0, 비게이트(토큰 불필요)
+                  --local-dir $CALLONE_HOME/models/qwen3_tts     # Apache2.0, 비게이트(토큰 불필요)
+              export CALLONE_TTS_MODEL=$CALLONE_HOME/models/qwen3_tts
   3) 화자 참조:  data/speakers/A/ref_24k.wav (7~10초·24kHz·깨끗) — Qwen3-TTS 클론 필수입력
-  4) llama-server:  llama-server -m <위 Q4_K_M.gguf> --host 127.0.0.1 --port 8080 \
-                      -c 8192 -n 512 --n-gpu-layers 99 --flash-attn
-  5) 앱:  source .venv-serve/bin/activate && (callone-serve  |  python -m studio)
+  4) llama.cpp:  bash scripts/build_llama_cuda.sh    # → $CALLONE_HOME/llama.cpp
+  5) llama-server:  $CALLONE_HOME/llama.cpp/build/bin/llama-server -m <위 Q4_K_M.gguf> \
+                      --host 127.0.0.1 --port 8080 -c 8192 -n 512 --n-gpu-layers 99
+  6) 앱:  source .venv-serve/bin/activate && (callone-serve  |  python -m studio)
 EOF

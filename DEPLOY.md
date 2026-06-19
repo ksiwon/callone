@@ -45,23 +45,24 @@ source .venv-serve/bin/activate
 > LLM 은 이 venv 에 없다 — `llama-server`(컴파일 바이너리)로 HTTP 서빙(§3-1)이라 파이썬 충돌 0.
 > 화자분리·학습까지 같은 박스에서 하려면 그건 **별도** `bash scripts/setup_server.sh`(.[heavy], 다른 venv).
 
-### 1-3. 환경변수 (Stop/Start 후에도 모델 유지 — /workspace 에 캐시)
+### 1-3. 환경변수 (Stop/Start 후에도 모델 유지 — $CALLONE_HOME 에 캐시)
 ```bash
-export HF_HOME=/workspace/hf_cache
-export HF_TOKEN=hf_xxx                        # 게이트 모델용(무료 동의)
+# 영속 폴더 자동 선택: RunPod=/workspace(쓰기가능) / Elice 등(non-root)=$HOME
+if [ -d /workspace ] && [ -w /workspace ]; then export CALLONE_HOME=/workspace; else export CALLONE_HOME=$HOME; fi
+export HF_HOME=$CALLONE_HOME/hf_cache
 export CALLONE_TIER=server_gpu                # GPU 강제(자동감지 대신 명시)
-# 위 3줄을 ~/.bashrc 에 넣어두면 재접속 편함
+# 위 줄들을 ~/.bashrc 에 넣어두면 재접속 편함. (9B GGUF·Qwen3-TTS 비게이트 → HF_TOKEN 불필요)
 ```
 
 ---
 
-## 2. 모델 받기 (/workspace 에 저장 → Stop/Start 유지)
+## 2. 모델 받기 ($CALLONE_HOME 에 저장 → Stop/Start 유지)
 
 ### 2-1. LLM — Qwen3.5-9B aggressive uncensored GGUF (서빙 직행, 학습 불필요)
 ```bash
 huggingface-cli download \
   HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive \
-  --local-dir /workspace/models/llm_A \
+  --local-dir $CALLONE_HOME/models/llm_A \
   --include "*Q4_K_M*.gguf"
 # configs/llm_server.yaml 의 serve_gguf_repo/serve_gguf_file 와 일치 확인.
 ```
@@ -71,7 +72,8 @@ huggingface-cli download \
 ```bash
 pip install faster-qwen3-tts                  # 없으면 studio TTS 칸은 piper/placeholder 폴백
 huggingface-cli download Qwen/Qwen3-TTS-12Hz-1.7B-Base \
-  --local-dir /workspace/models/qwen3_tts
+  --local-dir $CALLONE_HOME/models/qwen3_tts
+export CALLONE_TTS_MODEL=$CALLONE_HOME/models/qwen3_tts   # 로컬 다운본 지정(재다운로드 방지)
 ```
 
 ### 2-3. (제로샷 TTS만) CosyVoice3 — studio 제로샷 칸용
@@ -86,12 +88,13 @@ export COSYVOICE_MODEL_DIR=/path/to/pretrained_models/Fun-CosyVoice3-0.5B
 
 ### 3-1. llama-server (LLM, 별도 터미널 — 계속 켜둠)
 ```bash
-# llama.cpp 빌드(최초 1회): scripts/run_llama_server.md 참고
-./llama-server \
-  -m /workspace/models/llm_A/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf \
+# llama.cpp 빌드(최초 1회): bash scripts/build_llama_cuda.sh  → $CALLONE_HOME/llama.cpp
+$CALLONE_HOME/llama.cpp/build/bin/llama-server \
+  -m $CALLONE_HOME/models/llm_A/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf \
   --host 127.0.0.1 --port 8080 \
-  -c 8192 -n 512 --n-gpu-layers 99 --flash-attn
+  -c 8192 -n 512 --n-gpu-layers 99
 # health: curl http://127.0.0.1:8080/health  → {"status":"ok"}
+# (속도옵션은 잘 뜬 뒤 --flash-attn on. bare --flash-attn 은 최신 빌드서 에러)
 ```
 > 포트는 **8080 으로 통일**(코드 기본값 = `serve.yaml llm.base_url` = 결정서). 다른 포트를 쓰려면
 > llama-server `--port` 와 `configs/serve.yaml` 의 `llm.base_url` 을 같은 값으로 맞춘다.

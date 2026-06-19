@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
-# llama.cpp CUDA 빌드 (RunPod RTX 4090 / Linux). llama-server 바이너리 생성.
-# LLM 은 이 별도 바이너리로 HTTP 서빙 → 서빙 venv 와 파이썬 의존성 0(충돌 0).
+# llama.cpp CUDA 빌드 (클라우드 GPU / Linux). llama-server 바이너리 생성.
+# RunPod(RTX 3090/4090) · Elice(A100/H100) 모두 동작. LLM 은 이 별도 바이너리로
+# HTTP 서빙 → 서빙 venv 와 파이썬 의존성 0(충돌 0).
 #
-# 사용:  bash scripts/build_llama_cuda.sh           # /workspace/llama.cpp 에 빌드
-#        DEST=/root/llama.cpp bash scripts/build_llama_cuda.sh
+# 빌드 위치(영속 폴더) 자동 선택: RunPod=/workspace(쓰기가능) / 그 외(Elice 등)=$HOME.
+#   CALLONE_HOME 또는 DEST 로 강제 가능:
+#   사용:  bash scripts/build_llama_cuda.sh
+#          DEST=$HOME/llama.cpp bash scripts/build_llama_cuda.sh
+#          CALLONE_HOME=/data bash scripts/build_llama_cuda.sh   # → /data/llama.cpp
 set -euo pipefail
 
-DEST="${DEST:-/workspace/llama.cpp}"
+if [ -z "${DEST:-}" ]; then
+  BASE="${CALLONE_HOME:-}"
+  if [ -z "$BASE" ]; then
+    # /workspace 가 쓰기 가능하면(RunPod) 거기, 아니면(Elice 등 non-root) 홈.
+    if [ -d /workspace ] && [ -w /workspace ]; then BASE=/workspace; else BASE="$HOME"; fi
+  fi
+  DEST="$BASE/llama.cpp"
+fi
 
 echo "=== llama.cpp CUDA 빌드 → $DEST ==="
 if [ ! -d "$DEST/.git" ]; then
@@ -15,8 +26,12 @@ fi
 cd "$DEST"
 git pull --ff-only || true
 
-# CUDA 빌드(cmake). 빌드 도구 없으면 설치.
-command -v cmake >/dev/null 2>&1 || (apt-get update -y && apt-get install -y cmake build-essential) || true
+# CUDA 빌드(cmake). 빌드 도구 없으면 설치(root/sudo 환경에서만 — Elice non-root 면 이미 깔려있음).
+if ! command -v cmake >/dev/null 2>&1; then
+  (sudo apt-get update -y && sudo apt-get install -y cmake build-essential) 2>/dev/null \
+    || (apt-get update -y && apt-get install -y cmake build-essential) 2>/dev/null \
+    || echo "⚠️ cmake 자동설치 실패 — 'conda install -y cmake' 또는 패키지매니저로 직접 설치 후 재실행"
+fi
 
 cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=OFF
 cmake --build build --config Release -j"$(nproc)" --target llama-server
@@ -24,7 +39,8 @@ cmake --build build --config Release -j"$(nproc)" --target llama-server
 BIN="$DEST/build/bin/llama-server"
 if [ -x "$BIN" ]; then
   echo "✅ 빌드 완료: $BIN"
-  echo "   기동 예:  $BIN -m <gguf> --host 0.0.0.0 --port 8080 -c 8192 -n 512 --n-gpu-layers 99 --flash-attn"
+  echo "   기동 예:  $BIN -m <gguf> --host 127.0.0.1 --port 8080 -c 8192 -n 512 --n-gpu-layers 99"
+  echo "   (속도옵션은 잘 뜬 뒤 --flash-attn on 추가. bare --flash-attn 은 최신 빌드서 에러)"
 else
   echo "⚠️ llama-server 바이너리를 못 찾음 → build/bin 확인"; exit 1
 fi
