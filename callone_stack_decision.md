@@ -293,15 +293,15 @@ cmake -B build -DGGML_CUDA=ON
 cmake --build build --config Release -j$(nproc)
 
 # 2. 모델 다운로드 (파인튜닝 완료 GGUF)
-# /workspace에 저장 (RunPod Stop/Start 후에도 유지)
+# $CALLONE_HOME에 저장 (RunPod Stop/Start 후에도 유지)
 huggingface-cli download \
-  --local-dir /workspace/models/llm_A \
+  --local-dir $CALLONE_HOME/models/llm_A \
   lukey03/Qwen3.5-9B-abliterated-GGUF \
   "qwen3.5-9b-abliterated-Q4_K_M.gguf"
 
 # 3. llama-server 실행 (OpenAI 호환 API)
 ./build/bin/llama-server \
-  -m /workspace/models/llm_A/callone_A_q4_k_m.gguf \
+  -m $CALLONE_HOME/models/llm_A/callone_A_q4_k_m.gguf \
   --host 0.0.0.0 \
   --port 8080 \
   -c 8192 \              # 실시간 대화용 컨텍스트 (262K 불필요)
@@ -428,10 +428,11 @@ GPU:      RTX 4090 24GB (Community Cloud)
 ### 5-2. 환경 변수 설정 (Stop/Start 후에도 모델 재다운로드 방지)
 
 ```bash
-# RunPod 인스턴스 시작 시 반드시 설정
-export HF_HOME=/workspace/hf_cache
-export CALLONE_DATA_DIR=/workspace/data
-export HF_TOKEN="hf_..."
+# 인스턴스 시작 시 반드시 설정. $CALLONE_HOME = 영속 폴더(RunPod=/workspace, Elice 등=$HOME)
+if [ -d /workspace ] && [ -w /workspace ]; then export CALLONE_HOME=/workspace; else export CALLONE_HOME=$HOME; fi
+export HF_HOME=$CALLONE_HOME/hf_cache
+export CALLONE_DATA_DIR=$CALLONE_HOME/data
+# HF_TOKEN 은 게이트 모델 쓸 때만(현 스택 9B GGUF·Qwen3-TTS 는 비게이트 → 불필요)
 ```
 
 ### 5-3. 포트 설정
@@ -451,7 +452,7 @@ export HF_TOKEN="hf_..."
 코딩할 때만 START → 작업 종료 시 STOP
   - GPU 비용: $0.34/hr (STOP 시 $0.00)
   - Storage 비용: 150GB × $0.10~$0.20/GB/월 = 약 $15~$30/월 유지
-  - /workspace에 저장한 모델은 STOP/START 후에도 유지됨
+  - $CALLONE_HOME에 저장한 모델은 STOP/START 후에도 유지됨
   - TCP 포트 번호는 START할 때마다 새로 배정됨 → 클라이언트 코드의 ws:// 주소 업데이트 필요
 
 며칠 이상 쉴 때: 코드를 GitHub에 push → Pod를 Terminate(삭제)
@@ -485,7 +486,7 @@ export_format: "q4_k_m"        # GGUF 변환
 # configs/serve.yaml (업데이트)
 llm:
   backend: "llama_server"       # llama.cpp llama-server
-  model_path: "/workspace/models/llm_A/callone_A_q4_k_m.gguf"
+  model_path: "$CALLONE_HOME/models/llm_A/callone_A_q4_k_m.gguf"
   port: 8080
   n_gpu_layers: 99
   flash_attn: true
@@ -523,12 +524,13 @@ tts_tier: "server_gpu"
   - M5: Qwen3.5-9B abliterated QLoRA SFT (화자 A 페르소나)
   - 산출물: callone_A_q4_k_m.gguf, models/tts_server/A/
 
-[M7 RunPod RTX 4090에서]
+[M7 클라우드 GPU — RunPod RTX 3090/4090 또는 Elice A100/H100]
 Step 1. 환경 설정
-  export HF_HOME=/workspace/hf_cache
-  export HF_TOKEN=...
+  # $CALLONE_HOME = 영속 폴더(RunPod=/workspace, Elice 등=$HOME) 자동선택
+  if [ -d /workspace ] && [ -w /workspace ]; then export CALLONE_HOME=/workspace; else export CALLONE_HOME=$HOME; fi
+  export HF_HOME=$CALLONE_HOME/hf_cache       # 비게이트라 HF_TOKEN 불필요
 
-Step 2. 모델 다운로드 (/workspace에 저장)
+Step 2. 모델 다운로드 ($CALLONE_HOME에 저장)
   huggingface-cli download [모델들]
 
 Step 3. llama-server 실행 (백그라운드)
