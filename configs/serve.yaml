@@ -6,6 +6,10 @@ port: 8000
 # CALLONE_TIER 환경변수로 강제 가능.
 tier: auto
 mode: server                   # server(고품질) | phone(온디바이스) — tier 가 우선
+# 워밍업: Orchestrator 생성 시 ASR/LLM/TTS 더미 1회 예열(CUDA graph 빌드 + ref 인코딩 캐시 +
+# llama-server 슬롯). 첫 통화 턴의 콜드스타트(수 초)를 셋업 시간으로 옮긴다. 목소리 영향 0.
+# (스모크/CI 처럼 모델 없이 폴백만 돌릴 땐 false 로 두면 빠름.)
+warmup: true
 vad:
   backend: energy              # energy(torch-free, OV 호환) | silero(torch, 별도 프로세스 권장)
   end_silence_ms: 200

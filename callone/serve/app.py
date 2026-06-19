@@ -100,7 +100,10 @@ def create_app():
         from .orchestrator import Orchestrator
 
         if speaker_id not in _orchestrators:
-            _orchestrators[speaker_id] = Orchestrator(speaker_id)
+            # 생성+워밍업(CUDA graph/ref 인코딩)은 수 초 → 이벤트 루프 막지 않게 executor 에서.
+            loop = asyncio.get_running_loop()
+            _orchestrators[speaker_id] = await loop.run_in_executor(
+                None, Orchestrator, speaker_id)
         orch = _orchestrators[speaker_id]
         buf: list = []
 

@@ -191,6 +191,24 @@ PY
 ```
 ✅ 둘째 답에 **부산/3일** 류가 나오면 누적 맥락 작동. (창 더 넓히려면 `serve.yaml llm.max_history`↑ — RAG off 면 prefix 캐시로 길어도 저렴.)
 
+### 8-2. 지연 단계별 실측 (병목 진단 — 최적화의 출발점)
+"말 끝나고 첫 음성까지"가 **어느 단계(ASR/LLM/TTS)** 에서 시간을 먹는지 숫자로 본다.
+`Orchestrator` 생성 시 **워밍업**(ASR/LLM/TTS 더미 1회 = CUDA graph·ref 인코딩·llama 슬롯 예열)이
+자동 실행되므로 첫 턴 콜드스타트는 제거된 상태로 측정된다(목소리 영향 0).
+```bash
+# 텍스트 입력(ASR 건너뜀 — LLM+TTS 만). 가장 빠른 확인.
+callone-bench --speaker sis --turns 5 --text "여보세요, 밥은 먹었어?"
+
+# 실제 발화(WAV) 입력 → ASR 포함 전체 관통(짧은 클립일수록 실제 통화에 가까움).
+callone-bench --speaker sis --turns 5 --audio data/speakers/sis/ref_24k.wav
+
+# 워밍업 효과 확인: 콜드(첫 턴) vs warm 비교
+callone-bench --speaker sis --turns 3 --no-warmup
+```
+출력의 **중앙값(median)** 에서 `llm_total_ms` 와 `tts_first_ms` 중 큰 쪽이 병목.
+→ TTS 가 크면 ref 인코딩 캐싱/`chunk_size`(단 톤 영향 주의), LLM 이 크면 llama-server 토큰속도
+(`-ngl`, 양자화, speculative)로 깎는다. 둘 다 **목소리는 그대로** 두고 가능한 레버.
+
 ---
 
 ## 9. 브라우저 마이크 실시간 통화 (studio)

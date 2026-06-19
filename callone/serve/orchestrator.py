@@ -36,6 +36,9 @@ class Turn:
     first_audio_latency_ms: float = 0.0
     audio_chunks: list = field(default_factory=list)
     interrupted: bool = False
+    # 단계별 측정(병목 진단용) — asr/llm_first/llm_total/tts_first/first_audio (ms).
+    # RunPod 박스에서 실측해 진짜 병목을 찾는다(목소리 영향 0).
+    timings: dict = field(default_factory=dict)
 
 
 def _pick_llm(speaker: str, serve_cfg: dict):
@@ -184,6 +187,47 @@ class Orchestrator:
         self.sentence_pause_ms = int(tcfg.get("sentence_pause_ms", 180))
         self.history: list[dict] = []
         self._interrupt = threading.Event()
+        # 워밍업: 부팅 시 ASR/LLM/TTS 더미 1회 → CUDA graph 빌드 + ref 인코딩 + 슬롯 예열.
+        # 첫 통화 턴의 콜드스타트(수 초) 제거. 목소리/출력엔 영향 0(폐기됨). 초기 셋업만 길어짐.
+        if bool(cfg.get("warmup", True)):
+            self.warmup()
+
+    def warmup(self) -> dict:
+        """첫 턴 콜드스타트 제거 — 각 모델을 더미 입력으로 1회 예열(출력 폐기).
+
+        - ASR: 짧은 무음 전사 → faster-whisper 모델 로드 + 첫 추론 그래프.
+        - LLM: 짧은 프롬프트 → llama-server 슬롯/프리픽스 캐시 예열(이력에 안 남김).
+        - TTS: 짧은 문장 합성을 끝까지 소비 → CUDA graph 빌드 + ref_audio 인코딩 캐시.
+        결과 ms 를 로깅. 실패해도 통화는 폴백으로 계속(예외 안 던짐)."""
+        import numpy as _np
+
+        t = {}
+        t0 = time.time()
+        try:
+            self.asr.transcribe(_np.zeros(16000, dtype=_np.float32), 16000)
+        except Exception as e:  # noqa: BLE001
+            log.warning("ASR 워밍업 스킵(%s)", e)
+        t["asr_ms"] = (time.time() - t0) * 1000
+
+        t1 = time.time()
+        try:
+            for _ in self.llm.chat_stream("안녕", []):
+                pass   # 이력(self.history)엔 안 넣음 — 통화 맥락 오염 방지
+        except Exception as e:  # noqa: BLE001
+            log.warning("LLM 워밍업 스킵(%s)", e)
+        t["llm_ms"] = (time.time() - t1) * 1000
+
+        t2 = time.time()
+        try:
+            for _ in _tts_stream_emo(self.tts, "네, 안녕하세요.", "neutral"):
+                pass   # 끝까지 소비 → CUDA graph + ref 인코딩 완전 예열
+        except Exception as e:  # noqa: BLE001
+            log.warning("TTS 워밍업 스킵(%s)", e)
+        t["tts_ms"] = (time.time() - t2) * 1000
+        t["total_ms"] = (time.time() - t0) * 1000
+        log.info("워밍업 완료: ASR %.0f + LLM %.0f + TTS %.0f = %.0fms",
+                 t["asr_ms"], t["llm_ms"], t["tts_ms"], t["total_ms"])
+        return t
 
     def interrupt(self):
         """barge-in: 진행 중인 응답 중단 (app 이 마이크에서 사용자 발화 감지 시 호출)."""
@@ -211,24 +255,31 @@ class Orchestrator:
         self._interrupt.clear()
         t0 = time.time()
         user_text = self.asr.transcribe(audio, sr)
+        t_asr = time.time()
         turn = Turn(user_text=user_text)
         if not user_text.strip():
+            turn.timings = {"asr_ms": (t_asr - t0) * 1000}
             return turn
 
         # 1) LLM 응답 전체 수집(감정은 첫 감정 유지). 전화 응답은 짧아 수집 비용 작음.
         emotion = "neutral"
         parts: list[str] = []
+        t_llm_first = 0.0
         for sentence in self.llm.chat_stream(user_text, self.history):
+            if not t_llm_first:
+                t_llm_first = time.time()
             if self._interrupt.is_set():
                 turn.interrupted = True
                 break
             emotion, clean = _parse_emotion(sentence, emotion)   # §4-1 감정 추출
             if clean:
                 parts.append(clean)
+        t_llm_done = time.time()
         turn.reply_text = " ".join(parts)
 
         # 2) 합성: full = 응답 통째 1회(운율 일관·톤 안 튐, 구두점 자연 텀) /
         #          sentence = 문장별 + 사이 무음(저지연). barge-in 은 청크마다 존중.
+        t_tts_first = 0.0
         if parts and not turn.interrupted:
             sr_out = getattr(self.tts, "sr", 24000)
             segments = [turn.reply_text] if self.synth_mode == "full" else parts
@@ -241,17 +292,29 @@ class Orchestrator:
                         turn.interrupted = True
                         break
                     if not first:
-                        turn.first_audio_latency_ms = (time.time() - t0) * 1000
+                        t_tts_first = time.time()
+                        turn.first_audio_latency_ms = (t_tts_first - t0) * 1000
                         first = True
                     turn.audio_chunks.append(chunk)
                 if turn.interrupted:
                     break
 
+        # 단계별 시계: 어디서 시간 먹는지(ASR vs LLM vs TTS) 병목 진단(목소리 영향 0).
+        turn.timings = {
+            "asr_ms": (t_asr - t0) * 1000,
+            "llm_first_ms": (t_llm_first - t_asr) * 1000 if t_llm_first else 0.0,
+            "llm_total_ms": (t_llm_done - t_asr) * 1000,
+            "tts_first_ms": (t_tts_first - t_llm_done) * 1000 if t_tts_first else 0.0,
+            "first_audio_ms": turn.first_audio_latency_ms,
+        }
+
         if turn.reply_text:
             self.history.append({"role": "user", "content": user_text})
             self.history.append({"role": "assistant", "content": turn.reply_text})
-        log.info("턴: '%s' → '%s' (첫음성 %.0fms%s)", user_text[:30],
-                 turn.reply_text[:40], turn.first_audio_latency_ms,
+        tm = turn.timings
+        log.info("턴: '%s' → '%s' (첫음성 %.0fms = ASR %.0f + LLM첫 %.0f + TTS첫 %.0f%s)",
+                 user_text[:30], turn.reply_text[:40], turn.first_audio_latency_ms,
+                 tm.get("asr_ms", 0), tm.get("llm_first_ms", 0), tm.get("tts_first_ms", 0),
                  ", 중단됨" if turn.interrupted else "")
         return turn
 
@@ -266,6 +329,7 @@ class Orchestrator:
         self._interrupt.clear()
         t0 = time.time()
         user_text = self.asr.transcribe(audio, sr)
+        t_asr = time.time()
         yield ("user", user_text)
         if not user_text.strip():
             yield ("end", "")
@@ -273,6 +337,7 @@ class Orchestrator:
         first = False
         emotion = "neutral"
         parts: list[str] = []
+        t_tts_first = 0.0
         sr_out = getattr(self.tts, "sr", 24000)
         for sentence in self.llm.chat_stream(user_text, self.history):
             if self._interrupt.is_set():
@@ -289,7 +354,8 @@ class Orchestrator:
                 if self._interrupt.is_set():
                     yield ("interrupted", None); break
                 if not first:
-                    yield ("latency", (time.time() - t0) * 1000); first = True
+                    t_tts_first = time.time()
+                    yield ("latency", (t_tts_first - t0) * 1000); first = True
                 yield ("audio", chunk)
             else:
                 continue
@@ -298,4 +364,9 @@ class Orchestrator:
         if reply:
             self.history.append({"role": "user", "content": user_text})
             self.history.append({"role": "assistant", "content": reply})
+        yield ("timing", {
+            "asr_ms": (t_asr - t0) * 1000,
+            "tts_first_ms": (t_tts_first - t_asr) * 1000 if t_tts_first else 0.0,
+            "first_audio_ms": (t_tts_first - t0) * 1000 if t_tts_first else 0.0,
+        })
         yield ("end", reply)
