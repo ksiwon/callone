@@ -275,8 +275,9 @@ GRADIO_SHARE=1 python -m studio                   # 출력의 https://....gradio
 | TTS `ref_text is required ... ICL mode` | 5/7번 | ref_text.txt 두기(large-v3 전사) — ICL 필수 |
 | TTS 톤 끊김/흔들림 | 7번 | chunk_size=25·temperature=0.5(코드 기본). 더 매끄럽게는 cs=40(지연↑) |
 | `sox not found` 경고 | 5번 | `apt-get install -y sox`(경고일 뿐, 무시 가능) |
-| TTS가 Piper로 폴백 | 7번 | faster-qwen3-tts 미설치 / ref 없음 / CUDA |
-| ASR 빈 전사 | 8/9번 | ct2/cuDNN 불일치 → 코드가 CPU int8 자동 폴백(로그 확인) |
+| TTS가 Piper로 폴백 | 7번 | faster-qwen3-tts 미설치 / **ref_text.txt 없음(ICL 필수)** / CUDA. 5번 ref_text 확인 |
+| `ASR GPU 로드 실패 — CPU int8 폴백` (느려짐) | 8/9번 | ct2↔시스템 cuDNN 불일치. 코드가 torch 번들 cuDNN 을 선로드해 자동 해결. 그래도 뜨면: `export LD_LIBRARY_PATH=$(python -c "import os,nvidia;print(os.path.dirname(nvidia.__file__))")/cudnn/lib:$LD_LIBRARY_PATH` 후 재실행 |
+| 첫 턴만 30초 가까이 느림 | 8/9번 | 콜드 CUDA graph 캡처. **워밍업(기본 on)이 셋업으로 옮김** → 2턴부터 정상. 워밍업 로그 확인 |
 | 통화 응답 단순/엉뚱 | 8/9번 | llama-server 안 떠서 PersonaLLM 폴백 → 6번 health 재확인 |
 | gradio 링크 마이크 안 됨 | 9번 | gradio.live 는 HTTPS라 OK. 브라우저 마이크 권한 허용 확인 |
 

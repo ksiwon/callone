@@ -27,7 +27,9 @@ python-dotenv>=1.0
 soundfile>=0.12
 
 # --- ASR (faster-whisper = ctranslate2, transformers 의존 없음 → 충돌 안전) ---
-#   GPU(ctranslate2>=4.5)는 cuDNN9/CUDA12.x 필요. 불일치 시 asr_stream 이 CPU int8 자동 폴백.
+#   GPU(ctranslate2>=4.5)는 cuDNN9 필요. 시스템 cuDNN 과 어긋나면 GPU 로드 실패(3090 실측).
+#   → asr_stream._preload_cuda_libs 가 **torch[cu124] 번들 cuDNN/cuBLAS 를 선로드**해 자동 해결
+#     (torch 가 nvidia-cudnn-cu12/nvidia-cublas-cu12 동반 → 버전 일치 보장). 그래도 안 되면 CPU int8 폴백.
 faster-whisper>=1.0
 
 # --- TTS (Qwen3-TTS via faster-qwen3-tts, CUDA graph) ---

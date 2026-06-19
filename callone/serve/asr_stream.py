@@ -23,6 +23,33 @@ log = get_logger("asr_stream")
 REALTIME_DEFAULT = "large-v3-turbo"
 
 
+def _preload_cuda_libs() -> None:
+    """ctranslate2(faster-whisper)가 **torch 번들 cuDNN9/cuBLAS** 를 쓰도록 전역 심볼로 선로드.
+
+    클라우드 이미지의 시스템 cuDNN 과 ct2 요구버전이 어긋나면 GPU 로드가 실패→CPU int8 로
+    강등된다(RTX 3090 실측: cuDNN 불일치로 ASR 가 매 턴 CPU 로 떨어져 지연 급증).
+    torch[cu124] 는 nvidia-cudnn-cu12 / nvidia-cublas-cu12 를 동반 설치하므로, 그 .so 들을
+    RTLD_GLOBAL 로 미리 dlopen 해 두면 ct2 의 dlopen 이 **버전 맞는** 심볼을 잡는다.
+    Linux/CUDA 에서만 의미. 실패해도 무해(아래 CPU 폴백 유지)."""
+    import ctypes
+    import glob
+    import os
+
+    try:
+        import nvidia  # type: ignore  # torch[cu124] 동반(이 노트북엔 없음, 박스에만)
+    except Exception:  # noqa: BLE001
+        return
+    base = os.path.dirname(nvidia.__file__)
+    # cuBLAS 먼저(cuDNN 이 의존), 그담 cuDNN.
+    for pat in ("cublas/lib/libcublas*.so*", "cublas/lib/libcublasLt*.so*",
+                "cudnn/lib/libcudnn*.so*"):
+        for lib in sorted(glob.glob(os.path.join(base, pat))):
+            try:
+                ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+            except OSError:
+                pass
+
+
 @lru_cache(maxsize=2)
 def _load(model: str):
     from faster_whisper import WhisperModel  # type: ignore
@@ -30,11 +57,12 @@ def _load(model: str):
     dev = resolve_device()
     ct = compute_type_for(dev)
     log.info("스트리밍 ASR 로드: model=%s device=%s compute=%s", model, dev, ct)
+    if dev == "cuda":
+        _preload_cuda_libs()   # 시스템 cuDNN 불일치로 GPU 로드 실패하는 것 사전 차단
     try:
         return WhisperModel(model, device=dev, compute_type=ct)
     except Exception as e:  # noqa: BLE001
-        # ctranslate2>=4.5 ↔ cuDNN9/CUDA 불일치 등 GPU 로드 실패 → CPU int8 자동 폴백.
-        # (폴백 없으면 매 턴 빈 전사 → 통화가 조용히 먹통. studio backends 와 동일 처리.)
+        # 선로드해도 안 되면(드뭄) CPU int8 자동 폴백 — 통화는 살린다(빈 전사 방지).
         if dev == "cuda":
             log.warning("ASR GPU 로드 실패(%s) — CPU int8 폴백(ct2/cuDNN 버전 확인)", e)
             return WhisperModel(model, device="cpu", compute_type="int8")
