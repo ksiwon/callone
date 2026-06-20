@@ -82,6 +82,7 @@ export class CallSocket {
       onUser?: (text: string) => void;       // 내 발화 전사(이력 기록용)
       onFrame?: (jpegB64: string) => void;   // 토킹헤드 프레임
       onReady?: () => void;                  // session_init 완료
+      onAudioEnd?: () => void;               // 한 턴 송출 완료 → A/V 동기 재생 트리거
     },
   ) {
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -93,6 +94,7 @@ export class CallSocket {
         if (msg.type === "reply") this.cb.onReply(msg.text, msg.latency_ms);
         else if (msg.type === "user") this.cb.onUser?.(msg.text);
         else if (msg.type === "frame") this.cb.onFrame?.(msg.jpeg_b64);
+        else if (msg.type === "audio_end") this.cb.onAudioEnd?.();
         else if (msg.type === "session_ready") this.cb.onReady?.();
       } else {
         this.cb.onAudio(new Float32Array(e.data));

@@ -81,6 +81,9 @@ export default function CallScreen() {
   const audioCtxRef = useRef<AudioContext | null>(null);     // 마이크 캡처(16kHz)
   const playCtxRef = useRef<AudioContext | null>(null);      // 재생 전용(24kHz, TTS 출력 sr)
   const playheadRef = useRef<number>(0);                     // 다음 청크 재생 시작시각(누적)
+  const turnAudioRef = useRef<Float32Array[]>([]);           // 한 턴 오디오 버퍼(A/V 동기 재생용)
+  const turnFramesRef = useRef<string[]>([]);                // 한 턴 프레임 버퍼(같은 턴)
+  const frameTimersRef = useRef<number[]>([]);               // 프레임 표시 타이머(중단 시 정리)
   const cleanupMicRef = useRef<() => void>(() => {});
 
   // 저장된 대화 불러오기(이어하기 편의)
@@ -105,7 +108,8 @@ export default function CallScreen() {
     setStarted(true);
     setStatus("연결 중…");
     const sock = new CallSocket(id, {
-      onAudio: (pcm) => playPcm(pcm),
+      // A/V 동기: 오디오·프레임을 턴 버퍼에 모았다가 audio_end 에서 동시에 재생.
+      onAudio: (pcm) => { turnAudioRef.current.push(pcm); },
       onReply: (text, latency) => {
         historyRef.current.push({ role: "assistant", content: text }); persist();
         setStatus("통화 중");
@@ -116,7 +120,8 @@ export default function CallScreen() {
         if (text.trim()) { historyRef.current.push({ role: "user", content: text }); persist();
           setLogLines((l) => [...l, `나: ${text}`]); }
       },
-      onFrame: (jpegB64) => setFrame(jpegB64),
+      onFrame: (jpegB64) => { turnFramesRef.current.push(jpegB64); },
+      onAudioEnd: () => playTurn(),
       // 준비 완료(서버가 음성·사진·graph 다 세팅)되면 그때 마이크 켠다 — 연결 중엔 오디오 안 보냄
       // (안 그러면 서버가 init 처리 중에 오디오 폭주로 WS 수신큐 오버플로→끊김).
       onReady: () => { setStatus("통화 중"); startMic(sock); },
@@ -153,25 +158,47 @@ export default function CallScreen() {
     }
   }
 
-  function playPcm(pcm: Float32Array) {
-    // 전용 24kHz 컨텍스트(마이크 16kHz 컨텍스트서 재생하면 리샘플 왜곡=기계음).
+  // 한 턴의 오디오+프레임을 모았다가 **동시에** 재생(A/V 동기). 프레임은 오디오 길이에 균등 배치
+  // → 입모양이 음성에 맞음. 영상이 Ditto 추론(~수 초)으로 늦게 오므로 audio_end 후 한 번에 재생.
+  function playTurn() {
+    const chunks = turnAudioRef.current; turnAudioRef.current = [];
+    const frames = turnFramesRef.current; turnFramesRef.current = [];
+    // 이전 턴 프레임 타이머 정리
+    frameTimersRef.current.forEach((t) => clearTimeout(t)); frameTimersRef.current = [];
+    if (!chunks.length) {                       // 오디오 없으면 프레임만이라도 표시
+      if (frames.length) setFrame(frames[frames.length - 1]);
+      return;
+    }
     let ctx = playCtxRef.current;
     if (!ctx) { ctx = new AudioContext({ sampleRate: 24000 }); playCtxRef.current = ctx; }
     if (ctx.state === "suspended") ctx.resume();
-    const buf = ctx.createBuffer(1, pcm.length, 24000);   // Qwen3-TTS 출력 sr
-    buf.copyToChannel(pcm, 0);
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    const audio = new Float32Array(total);
+    let off = 0; for (const c of chunks) { audio.set(c, off); off += c.length; }
+    const dur = audio.length / 24000;           // 초
+    const buf = ctx.createBuffer(1, audio.length, 24000);
+    buf.copyToChannel(audio, 0);
     const node = ctx.createBufferSource();
     node.buffer = buf; node.connect(ctx.destination);
-    // 청크를 "지금"이 아니라 직전 청크 끝(playhead)에 이어붙여 순차재생 → 겹침/기계음 제거.
-    const start = Math.max(ctx.currentTime + 0.02, playheadRef.current);
-    node.start(start);
-    playheadRef.current = start + buf.duration;
+    const startAt = ctx.currentTime + 0.08;
+    node.start(startAt);
+    // 프레임을 오디오 시작에 맞춰 균등 스케줄(frames.length 개를 dur 초에 분산).
+    if (frames.length) {
+      const leadMs = (startAt - ctx.currentTime) * 1000;
+      const base = performance.now() + leadMs;
+      frames.forEach((f, i) => {
+        const at = base + (i / frames.length) * dur * 1000;
+        const t = window.setTimeout(() => setFrame(f), Math.max(0, at - performance.now()));
+        frameTimersRef.current.push(t);
+      });
+    }
   }
   function toggleMute() { mutedRef.current = !mutedRef.current; setMuted(mutedRef.current); }
 
   function endCall() {
     cleanupMicRef.current();
     sockRef.current?.stop();          // 서버가 인메모리 개인데이터 폐기
+    frameTimersRef.current.forEach((t) => clearTimeout(t)); frameTimersRef.current = [];
     try { playCtxRef.current?.close(); } catch { /* noop */ }
     playCtxRef.current = null; playheadRef.current = 0;
     nav("/");
