@@ -3,10 +3,13 @@
 인스턴스를 지웠다 다시 만들었을 때 **이 순서대로만** 하면 음성+영상 통화까지 바로 된다.
 모든 함정(드라이버·의존성·모델경로)은 스크립트에 자가치유로 박혀 있다. 게이트 모델 없음(HF 토큰 불필요).
 
+> 이 문서 = **제로샷 방식**(5~10초 음성+사진 업로드 → 즉시 복제, 학습 없음). GPU는 **A100/H100·RTX 4090/3090 둘 다** 지원
+> (Ditto TensorRT 차이는 맨 아래 "알아둘 것" 참고). 긴 녹음(1시간+)으로 화자를 **풀 파인튜닝**하는 고급 경로는 [docs/README.md](README.md) 참고.
+
 ## 구성 (4개 서비스, 각자 독립 venv/프로세스)
 | 서비스 | 포트 | venv/env | 역할 |
 |---|---|---|---|
-| llama-server | 8090 | (바이너리) | LLM **EXAONE-3.5-7.8B-abliterated**(한국어 무검열) |
+| llama-server | 8090 | (바이너리) | LLM **EXAONE-3.5-7.8B**(LG 한국어 특화) |
 | cosyvoice-server | 8092 | conda `cosyvoice` | TTS **CosyVoice3-0.5B**(제로샷 음색복제, 안정) |
 | avatar-server | 8091 | `.venv-avatar` | 토킹헤드 **Ditto**(TensorRT, RTF<1) |
 | callone-serve | 8000 | `.venv-serve` | 오케스트레이터(ASR+LLM+TTS+아바타 조립, WS) |

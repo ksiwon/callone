@@ -53,17 +53,8 @@ PY
 
 cat <<'EOF'
 
-=== 준비 완료 — 다음 순서 (자세히는 docs/RUNPOD_RUN.md) ===
-  ※ $CALLONE_HOME = 영속 폴더(RunPod=/workspace, Elice 등=$HOME). 먼저 잡아라:
-    if [ -w /workspace ]; then export CALLONE_HOME=/workspace; else export CALLONE_HOME=$HOME; fi
-  1) LLM 모델:  huggingface-cli download HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive \
-                  --local-dir $CALLONE_HOME/models/llm_A --include "*Q4_K_M*.gguf"
-  2) TTS 모델:  huggingface-cli download Qwen/Qwen3-TTS-12Hz-1.7B-Base \
-                  --local-dir $CALLONE_HOME/models/qwen3_tts     # Apache2.0, 비게이트(토큰 불필요)
-              export CALLONE_TTS_MODEL=$CALLONE_HOME/models/qwen3_tts
-  3) 화자 참조:  data/speakers/A/ref_24k.wav (7~10초·24kHz·깨끗) — Qwen3-TTS 클론 필수입력
-  4) llama.cpp:  bash scripts/build_llama_cuda.sh    # → $CALLONE_HOME/llama.cpp
-  5) llama-server:  $CALLONE_HOME/llama.cpp/build/bin/llama-server -m <위 Q4_K_M.gguf> \
-                      --host 127.0.0.1 --port 8080 -c 8192 -n 512 --n-gpu-layers 99
-  6) 앱:  source .venv-serve/bin/activate && (callone-serve  |  python -m studio)
+=== 서빙 venv 준비 완료 ===
+  이 스크립트는 .venv-serve 만 만든다(보통 scripts/bootstrap_gpu.sh 가 자동 호출).
+  모델 다운로드·llama-server 기동·전체 실행은 전부 자동화돼 있으니 아래만 보면 된다:
+    → docs/FRESH_SETUP.md  (clone → bootstrap_gpu.sh → setup_cosyvoice_gpu.sh → setup_avatar_gpu.sh → run_all.sh)
 EOF

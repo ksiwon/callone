@@ -1,25 +1,18 @@
-# S5 서버 LLM (§15) — callone_stack_decision.md(2026-06-14) §1/§6 적용
-# 기존 Gemma 4 12B 폐기 → Qwen3.5-9B (uncensored / aggressive abliteration).
-# ※ §3 검증 의무: 고정 전 HF 최신본 재확인 후 README 기록.
+# S5 서버 LLM — **선택적 화자 페르소나 LoRA 학습(mode B, 고급)** + 하드웨어 티어 기본값에서 참조.
+# ⚠️ 현재 기본 통화 서빙은 이 파일이 아니라 scripts/bootstrap_gpu.sh 가 받는 EXAONE GGUF +
+#    llama-server 를 쓴다(serve.yaml llm.base_url). 빠른 제로샷 통화엔 이 파일 안 건드려도 됨.
 
-# ── 모델 선택 ────────────────────────────────────────────────────────────
-# 사용자 요구(2026-06-14): "uncensored, aggressive 모델로 반드시".
-# aggressive 변종은 GGUF 전용 → 직접 서빙(SFT 없이)할 때 기본값.
-serve_gguf_repo: "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive"  # GGUF, aggressive 검열해제
-serve_gguf_file: "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf"  # 실파일명(웹검증 2026-06-17, 5.3GB)
-# ⚠️ 이 repo 는 멀티모달(mmproj vision 동봉) — llama-server 텍스트 서빙엔 -Q4_K_M.gguf 만 받으면 됨.
-# LoRA SFT(페르소나 주입)용 학습 베이스 — aggressive 는 GGUF만이라 학습엔 safetensors uncensored 사용.
-# abliteration 은 weight projection 이라 SFT 로 덮어도 refusal 복원 안 됨(§1-2).
-base_model: "huihui-ai/Huihui-Qwen3.5-9B-abliterated"   # safetensors, uncensored (학습 베이스)
-# 대안 1순위(둘 중 택): "lukey03/Qwen3.5-9B-abliterated"
+# ── 모델(한국어 특화 EXAONE) ─────────────────────────────────────────────
+serve_gguf_repo: "AetherArchitectural/EXAONE-3.5-7.8B-Instruct-abliterated-GGUF-ARM-Imatrix-Community"  # GGUF
+serve_gguf_file: "EXAONE-3.5-7.8B-Instruct-abliterated-Q6_K-imat.gguf"
+base_model: "LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct"   # LoRA SFT 학습 베이스(LG 한국어 특화)
 
-method: "lora"                  # ⚠️ Qwen3.5 = sparse MoE. Unsloth(2026): MoE 는 4bit QLoRA 비권장
-load_in_4bit: false             # → bf16 LoRA 권장(bitsandbytes MoE 4bit 임포트 버그 회피).
-                                #   VRAM 빠듯하면 true(QLoRA)로 — 단 MoE 로드 이슈 가능.
-lora: {r: 16, alpha: 16, dropout: 0.05, target: "all-linear"}   # §1-3: alpha=r, 전 레이어
+method: "lora"
+load_in_4bit: false             # bf16 LoRA 권장. VRAM 빠듯하면 true(QLoRA).
+lora: {r: 16, alpha: 16, dropout: 0.05, target: "all-linear"}   # alpha=r, 전 레이어
 train: {epochs: 3, lr: 1.0e-4, bsz: 4, grad_accum: 4, max_seq_len: 4096, bf16: true}
-# ⚠️ Windows 파인튜닝은 refcount fatal error 보고됨(unsloth #2742) → 학습은 Linux/A100 에서.
-chat_template: "qwen3.5"        # ChatML 기반(<|im_start|>/<|im_end|>)
+# ⚠️ Windows 파인튜닝 이슈 보고됨 → 학습은 Linux/A100 에서.
+chat_template: "exaone"         # EXAONE 자체 ChatML 형식
 enable_thinking: false          # 대화용: thinking 비활성(응답 지연 억제, §1-3)
 export_format: "q4_k_m"         # 학습 후 GGUF 변환(속도/품질 균형)
 output_dir: "models/llm_server"

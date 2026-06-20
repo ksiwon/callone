@@ -73,10 +73,9 @@ callone-llm-train   = "callone.llm.train_lora:main"
 callone-serve       = "callone.serve.app:main"
 callone-bench       = "callone.serve.bench_latency:main"   # 통화 지연 단계별 실측(RunPod)
 callone-pilot       = "callone.pilot:main"
-callone-studio      = "studio.app:main"          # 통합 앱(전사·TTS·통화 한 진입점). CWD=repo 루트
 
 [tool.setuptools.packages.find]
-include = ["callone*", "studio*"]
+include = ["callone*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

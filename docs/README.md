@@ -1,36 +1,28 @@
 # callone 사용 가이드
 
-상황에 맞는 문서를 보면 된다.
+## 🚀 처음 세팅(권장) → **[FRESH_SETUP.md](FRESH_SETUP.md)**
+새 GPU 인스턴스에서 클론 → 스크립트 3개 → 실행까지 한 번에. 제로샷(5~10초 음성+사진) 영상통화는 이거 하나면 끝.
 
-> 🚀 **전사·음성복제·통화를 한 화면에서** → [통합 앱 `studio/`](../studio/README.md) (`callone-studio`)
-> 🛠️ **서버에 올리고 실행** → [`DEPLOY.md`](../DEPLOY.md)
-
-| 하고 싶은 것 | 문서 |
-|---|---|
-| 한 진입점에서 전부(전사/제로샷TTS/통화) 골라 실행 | [통합 앱 studio](../studio/README.md) |
-| 서버 배포·모델 다운·기동 | [DEPLOY.md](../DEPLOY.md) |
-| 노트북에서 녹음 파일 처리(데이터셋·방언프로필) | [1. 로컬에서 학습](1_로컬에서_학습.md) |
-| GPU 서버에서 1000+개로 화자분리·전사 + LoRA(말투) 학습 | [2. GPU에서 학습](2_GPU에서_학습.md) |
-| 노트북에서 clone과 **실시간 통화** (Qwen3.5+LoRA, llama.cpp, Piper) | [3. 노트북에서 통화](3_노트북에서_통화.md) |
-| 휴대폰에서 통화 | [4. 휴대폰에서 통화](4_휴대폰에서_통화.md) |
-| 그 사람 **목소리** 학습 (Piper TTS, GPU) | [5. 화자 A 목소리 학습](5_화자A_목소리_학습.md) |
+상위 개요·두 가지 사용방식(제로샷 vs 풀튜닝)·두 GPU(A100/4090)는 [최상위 README](../README.md).
 
 ---
 
-## 새 데이터셋으로 처음부터 (재현 순서)
+## 문서 맵
 
-녹음(m4a, 두 화자 혼합) 한 묶음으로 시작 → clone 통화까지. `A`=상대, `B`=본인.
+| 하고 싶은 것 | 문서 |
+|---|---|
+| **새 인스턴스 세팅 + 제로샷 영상통화** | [FRESH_SETUP.md](FRESH_SETUP.md) |
+| 토킹헤드(Ditto) 상세·문제해결 | [AVATAR_RUN.md](AVATAR_RUN.md), [avatar_talking_head_design.md](avatar_talking_head_design.md) |
 
-1. **데이터** — m4a 전부 `data/raw/` 에. → [2. GPU에서 학습](2_GPU에서_학습.md) A·B 단계.
-   `setup_server.sh full` 이 화자분리·전사·방언프로필·TTS셋·대화셋·페르소나카드 생성
-   → 산출물: `data/speakers/{A,B}/`, `data/datasets/{A,B}/`
-2. **말투(LLM LoRA)** — GPU에서 `callone-llm-train` (Qwen3.5-4B QLoRA)
-   → 산출물: `models/llm_phone/{A,B}/checkpoint-*/` (LoRA 어댑터)
-3. **목소리(TTS)** — [5. 화자 A 목소리 학습](5_화자A_목소리_학습.md): `prep_piper.py` → GPU Piper 학습 → `A.onnx`
-4. **노트북 배포·통화** — [3. 노트북에서 통화](3_노트북에서_통화.md):
-   `make_gguf.py`(LoRA→GGUF) → llama-server → `models/tts_piper/A.onnx` 배치 → `call_mic.py`
+### 풀 파인튜닝(고급, mode B) — 긴 녹음으로 화자 학습
+긴 통화 녹음(1시간+)에서 화자를 분리하고 목소리·말투를 **학습**하는 경로. 제로샷보다 무겁지만 충실도↑.
 
-노트북으로 가져올 산출물: `models/llm_phone/*/checkpoint-*`, `data/speakers/*`,
-`models/tts_piper/*.onnx`. (중간물 base/merged/f16 는 노트북에서 재생성 후 삭제 가능.)
+| 단계 | 문서 |
+|---|---|
+| 노트북에서 녹음 처리(데이터셋·방언프로필) | [1. 로컬에서 학습](1_로컬에서_학습.md) |
+| GPU에서 화자분리·전사 + 말투 LoRA 학습 | [2. GPU에서 학습](2_GPU에서_학습.md) |
+| 노트북에서 통화 | [3. 노트북에서 통화](3_노트북에서_통화.md) |
+| 휴대폰에서 통화 | [4. 휴대폰에서 통화](4_휴대폰에서_통화.md) |
+| 화자 목소리 학습(Piper TTS) | [5. 화자 A 목소리 학습](5_화자A_목소리_학습.md) |
 
-> 기술 명세·모델 결정 근거는 최상위 [`README.md`](../README.md), 원 스펙은 [`callone_spec.md`](../callone_spec.md).
+> 초기 설계 기록·구 런북은 [`legacy/`](../legacy/) 에 보관(현재 스택과 다를 수 있음).

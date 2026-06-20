@@ -1,7 +1,7 @@
-# 영상통화(토킹헤드) 실행 — GPU 켜자마자 (Ditto, 증명사진 1장)
+# 영상통화(토킹헤드) — Ditto 구조·문제해결 노트
 
-> 음성 통화가 먼저 돼 있어야 한다([RUNPOD_RUN.md](RUNPOD_RUN.md) 1~6번 = bootstrap + llama-server).
-> 그 위에 **얼굴 레이어**를 얹는다. 우선순위: 목소리 > 한국어 > **얼굴 자연스러움** > 실시간.
+> **설치/실행은 [FRESH_SETUP.md](FRESH_SETUP.md) 가 정본**(setup_avatar_gpu.sh 가 Ditto+TensorRT+의존성 자동).
+> 이 문서는 구조·디버깅 참고용. 우선순위: 목소리 > 한국어 > **얼굴** > 속도.
 > 안전철학: Ditto 안 떠도 **정지사진 폴백** → 음성 통화는 항상 정상.
 
 전체 그림(별 프로세스 3개, llama-server 패턴):
@@ -15,7 +15,7 @@
 
 ## 1. 음성 스택 (이미 됨)
 ```bash
-PORT=8090 bash scripts/bootstrap_gpu.sh        # venv·llama-server·모델 (RUNPOD_RUN.md 참고)
+PORT=8090 bash scripts/bootstrap_gpu.sh        # venv·llama-server·모델 (FRESH_SETUP.md 참고)
 # 화자 ref(목소리) + 증명사진 둘 다 data/speakers/<화자>/ 에:
 #   ref_24k.wav + ref_text.txt  (목소리)   /   portrait.jpg|png  (얼굴)
 ```

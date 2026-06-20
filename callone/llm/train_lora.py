@@ -1,8 +1,7 @@
-"""S5 Qwen3.5 LoRA/QLoRA 파인튜닝 (§15.2, callone_stack_decision §1).
+"""S5 화자 페르소나 LoRA/QLoRA 파인튜닝 (선택적·고급, mode B).
 
-같은 SFT 데이터로 9B(서버, uncensored/abliterated)·4B(노트북) LoRA 각각.
-→ models/llm_server/{spk}, models/llm_phone/{spk}.
-Qwen3.5 채팅 템플릿(ChatML, enable_thinking=False). HF+QLoRA 또는 Unsloth.
+같은 SFT 데이터로 서버용·노트북용 LoRA 각각 → models/llm_server/{spk}, models/llm_phone/{spk}.
+베이스/템플릿은 configs/llm_server.yaml·llm_phone.yaml 참조(EXAONE 기본). HF+QLoRA 또는 Unsloth.
 
 무거운 의존성(transformers/peft/bitsandbytes) — H100. 미설치 시 레시피 안내.
 
@@ -169,7 +168,7 @@ def _print_recipe(cfg: dict, spk: str) -> None:
         "  데이터: data/datasets/%s/dialogue/sft.jsonl\n"
         "  → A100 에서 Unsloth/trl QLoRA + apply_chat_template(enable_thinking=False).\n"
         "  → 학습 후 GGUF q4_k_m 변환(scripts/make_gguf.py) → llama-server.\n"
-        "  ※ 서빙은 aggressive uncensored GGUF(serve_gguf_repo) 직접도 가능.",
+        "  ※ 학습 없이 빠른 통화는 bootstrap_gpu.sh 의 EXAONE GGUF 직접 서빙(제로샷).",
         spk, cfg.get("base_model"), cfg.get("method"),
         cfg.get("lora"), cfg.get("train"), spk,
     )

@@ -35,7 +35,7 @@ llm:
   use_rag: false               # 사실 추출 후 true 로
   embedder: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # fastembed 지원본(한국어 OK)
   rag_min_score: 0.45          # 게이트(MiniLM 기준): 미만이면 기억 안 씀. 허위회상 잦으면 ↑, 회상 약하면 ↓
-  temperature: 0.4             # 실측(aggressive abliterated 9B): 0.7 은 한국어 비문 잦음 → 0.4 가 문법 안정. 더 생생하게는 ↑(품질 trade)
+  temperature: 0.4             # 실측(EXAONE-3.5-7.8B): 0.7 은 한국어 비문 잦음 → 0.4 가 문법 안정. 더 생생하게는 ↑(품질 trade)
   top_p: 0.8
   top_k: 20
   max_new_tokens: 96           # 160 은 모델이 다 채우려 주절대다 끝에서 잘림. 96 + 강한 '1~2문장' 프롬프트로

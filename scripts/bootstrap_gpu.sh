@@ -22,8 +22,7 @@ export HF_HOME="${HF_HOME:-$CALLONE_HOME/hf_cache}"
 export CALLONE_TIER="${CALLONE_TIER:-server_gpu}"
 export CALLONE_TTS_MODEL="${CALLONE_TTS_MODEL:-$CALLONE_HOME/models/qwen3_tts}"
 SPK="${SPK:-sis}"
-# LLM: EXAONE-3.5-7.8B abliterated(LG 한국어 특화 + 무검열). 한국어 자연스러움↑, 4090(24GB)도 가뿐.
-#   env 로 교체 가능. (구 Qwen3.5: LLM_REPO=HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive LLM_GLOB='*Q4_K_M*' LLM_DIR=$CALLONE_HOME/models/llm_A)
+# LLM: EXAONE-3.5-7.8B(LG 한국어 특화 모델). 한국어 자연스러움↑, 4090(24GB)도 가뿐. env 로 교체 가능.
 LLM_REPO="${LLM_REPO:-AetherArchitectural/EXAONE-3.5-7.8B-Instruct-abliterated-GGUF-ARM-Imatrix-Community}"
 LLM_GLOB="${LLM_GLOB:-*Q6_K*.gguf}"
 LLM_DIR="${LLM_DIR:-$CALLONE_HOME/models/llm_exaone}"
@@ -120,7 +119,7 @@ else echo "[3/5] TTS 모델 있음 → 스킵"; fi
 if [ -f "data/speakers/$SPK/ref_24k.wav" ] && [ -f "data/speakers/$SPK/ref_text.txt" ]; then
   echo "[4/5] 화자 참조 OK (data/speakers/$SPK/)"
 else
-  echo "[4/5] ⚠️ data/speakers/$SPK/ref_24k.wav (+ref_text.txt) 없음 → RUNPOD_RUN.md §5 로 만들어라."
+  echo "[4/5] 디스크 화자 ref 없음 — 정상(제로샷은 통화 시작 시 UI 업로드 음성으로 인메모리 설정)."
   echo "       (없으면 TTS 가 Piper 로 폴백한다)"
 fi
 
