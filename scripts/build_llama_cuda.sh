@@ -33,7 +33,12 @@ if ! command -v cmake >/dev/null 2>&1; then
     || echo "⚠️ cmake 자동설치 실패 — 'conda install -y cmake' 또는 패키지매니저로 직접 설치 후 재실행"
 fi
 
-cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=OFF
+# CUDA 아키텍처를 현재 GPU 것만(native) 빌드 → 안 쓸 옛 아키 중복 컴파일 제거로 빌드 대폭 단축.
+#   (default 는 여러 아키 리스트라 nvcc 가 커널마다 N배 컴파일 = 40~60분). native = 박힌 GPU 한 종류만.
+#   특정 아키 강제: CUDA_ARCH=80 bash ...(A100=80, 3090/4090=86/89, H100=90).
+CUDA_ARCH="${CUDA_ARCH:-native}"
+echo "=== CUDA 아키텍처: $CUDA_ARCH (jobs=$(nproc)) ==="
+cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=OFF -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH"
 cmake --build build --config Release -j"$(nproc)" --target llama-server
 
 BIN="$DEST/build/bin/llama-server"
