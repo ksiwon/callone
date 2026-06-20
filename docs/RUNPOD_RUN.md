@@ -21,8 +21,10 @@ cd "$CALLONE_HOME" && git clone https://github.com/ksiwon/callone.git && cd call
 # 1) 한 방: venv→llama-server(프리빌트 HF 다운, 컴파일 생략)→모델 다운→기동·health 까지
 SPK=sis bash scripts/bootstrap_gpu.sh
 ```
-- **llama.cpp 는 기본으로 HF 의 프리빌트(ksiwon/callone-llama-bin)를 받아 컴파일을 건너뛴다.** 다른 이미지라
-  실행 안 되면(CUDA/glibc 불일치) **자동으로 native 컴파일 폴백**. 강제 컴파일: `LLAMA_SERVER_URL= bash scripts/bootstrap_gpu.sh`.
+- **llama.cpp 는 기본으로 HF 의 프리빌트(ksiwon/callone-llama-bin)를 받아 컴파일을 건너뛴다.** 받은 바이너리는
+  **GPU 에서 실제 동작 검증**(모델 로드)하고, 안 되면(드라이버↔CUDA 불일치 등) **torch CUDA 버전에 맞춰 자동 재빌드**.
+  llama-server 는 torch 번들 CUDA 런타임을 쓰므로 구드라이버(예 12.2) 박스서도 동작. 강제 컴파일: `LLAMA_SERVER_URL= bash scripts/bootstrap_gpu.sh`.
+- 포트 기본 8080. 점유돼 `couldn't bind` 뜨면 `PORT=8090 bash scripts/bootstrap_gpu.sh`.
 - 화자 참조음성(§5)은 개인 파일이라 자동 못 받는다 → **부트스트랩이 "없음" 경고하면 §5 로 만들고 다시 실행**(나머지는 스킵돼 빠름).
 - **새로 컴파일했다면**(폴백 발생 등) 그 바이너리를 올려 프리빌트를 갱신하면 다음부턴 또 빨라진다:
   ```bash
@@ -295,6 +297,8 @@ GRADIO_SHARE=1 python -m studio                   # 출력의 https://....gradio
 | `/workspace: No such file or directory` (Elice) | 1번 | `/workspace` 없음 → 1번 `CALLONE_HOME` 자동선택 블록 먼저. 잘못 박았으면 `sed -i '\#/workspace#d' ~/.bashrc` |
 | `Permission denied` 빌드/mkdir (non-root) | 1·3번 | `$CALLONE_HOME`($HOME)로 자동 빠짐. 빌드는 `bash scripts/build_llama_cuda.sh`(DEST 자동) |
 | `cmake` 없음 (non-root) | 3번 | `conda install -y cmake` 또는 devel 이미지 |
+| `CUDA error: device kernel image is invalid` (기동 시 core dump) | 6번 | **드라이버보다 최신 CUDA 로 빌드됨**(Elice: 드라이버 12.2, nvcc 12.8). 부트스트랩이 torch CUDA(12.4)에 맞춰 **자동 재빌드** + 런타임 LD_LIBRARY_PATH=torch libs. 수동 재빌드: `LLAMA_SERVER_URL= bash scripts/bootstrap_gpu.sh` |
+| `couldn't bind HTTP server socket ... port` | 6번 | 그 포트 점유. `PORT=8090 bash scripts/bootstrap_gpu.sh`(serve.yaml 도 같이 바꿔야: `sed -i 's#:8080#:8090#' configs/serve.yaml`) |
 | `hf_transfer` ModuleNotFound | 4번 | `pip install hf_transfer` (또는 `export HF_HUB_ENABLE_HF_TRANSFER=0`) |
 | transformers 충돌 | 2번 | heavy venv 와 섞였는지. `.venv-serve` 단독(transformers 4.57.3) |
 | llama 응답 content 빈데 reasoning_content만 참 | 6번 | thinking ON. `chat_template_kwargs.enable_thinking=false`(코드 처리) 또는 서버 `--reasoning-budget 0` |

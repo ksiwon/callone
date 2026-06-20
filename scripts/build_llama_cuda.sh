@@ -48,8 +48,32 @@ if [ "$CUDA_ARCH" = "auto" ] || [ "$CUDA_ARCH" = "native" ]; then
     CUDA_ARCH="80;86;89;90"
   fi
 fi
-echo "=== CUDA 아키텍처: $CUDA_ARCH (jobs=$(nproc)) ==="
-cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=OFF -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH"
+# ⚠️ CUDA 툴킷 버전 ↔ 드라이버 호환(Elice 실측 함정): 드라이버보다 최신 툴킷으로 빌드하면
+#    런타임에 'CUDA error: device kernel image is invalid' 로 죽는다(Elice: 드라이버 12.2 인데
+#    nvcc 12.8). 해결 = **torch 가 이미 이 드라이버서 도는 CUDA 버전(보통 12.4)에 맞춰 빌드**.
+#    torch 런타임 라이브러리를 그대로 쓰므로 호환 보장. CUDA_HOME 으로 강제 가능.
+TORCH_CUDA="$(python -c 'import torch;print(torch.version.cuda)' 2>/dev/null || true)"   # 예: 12.4
+NVCC=""
+if [ -n "${CUDA_HOME:-}" ] && [ -x "$CUDA_HOME/bin/nvcc" ]; then
+  NVCC="$CUDA_HOME/bin/nvcc"
+elif [ -n "$TORCH_CUDA" ] && [ -x "/usr/local/cuda-$TORCH_CUDA/bin/nvcc" ]; then
+  NVCC="/usr/local/cuda-$TORCH_CUDA/bin/nvcc"
+elif [ -n "$TORCH_CUDA" ]; then
+  sysver="$(nvcc --version 2>/dev/null | grep -oE 'release [0-9]+\.[0-9]+' | grep -oE '[0-9.]+' || true)"
+  if [ "$sysver" != "$TORCH_CUDA" ]; then
+    echo "=== 시스템 CUDA($sysver) ≠ torch CUDA($TORCH_CUDA) → cuda-toolkit-${TORCH_CUDA/./-} 설치 시도(드라이버 호환 빌드) ==="
+    (sudo apt-get install -y "cuda-toolkit-${TORCH_CUDA/./-}") 2>/dev/null || true
+  fi
+  [ -x "/usr/local/cuda-$TORCH_CUDA/bin/nvcc" ] && NVCC="/usr/local/cuda-$TORCH_CUDA/bin/nvcc"
+fi
+[ -z "$NVCC" ] && NVCC="$(command -v nvcc || true)"
+CUDA_OPT=""
+if [ -n "$NVCC" ]; then
+  export PATH="$(dirname "$NVCC"):$PATH"
+  CUDA_OPT="-DCMAKE_CUDA_COMPILER=$NVCC"
+fi
+echo "=== CUDA 아키텍처: $CUDA_ARCH · nvcc: ${NVCC:-(system)} (torch CUDA=${TORCH_CUDA:-?}) · jobs=$(nproc) ==="
+cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=OFF -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH" $CUDA_OPT
 cmake --build build --config Release -j"$(nproc)" --target llama-server
 
 BIN="$DEST/build/bin/llama-server"

@@ -10,8 +10,10 @@
 #   LLAMA_SERVER_URL=https://.../llama-bin.tgz bash scripts/bootstrap_gpu.sh
 #                                                 # ↑ 한 번 빌드해 올려둔 바이너리 재사용(컴파일 스킵)
 #   NO_SERVE=1 bash scripts/bootstrap_gpu.sh      # llama-server 자동기동 생략
+#   PORT=8090 bash scripts/bootstrap_gpu.sh       # llama-server 포트(기본 8080)
 set -euo pipefail
 cd "$(dirname "$0")/.."                            # repo 루트
+PORT="${PORT:-8080}"
 
 # ── 0. 영속폴더/환경 (RunPod=/workspace, Elice 등=$HOME 자동) ──────────────
 if [ -d /workspace ] && [ -w /workspace ]; then export CALLONE_HOME="${CALLONE_HOME:-/workspace}"
@@ -46,8 +48,29 @@ source .venv-serve/bin/activate
 command -v huggingface-cli >/dev/null || pip install -q "huggingface_hub[cli]" || true
 pip install -q hf_transfer 2>/dev/null || true
 
-# ── 2. llama-server: 있으면 스킵 / URL 주면 다운 / 아니면 native 컴파일 ────
-DL_OK=0
+# llama-server 가 **torch 번들 CUDA 런타임**(드라이버 호환 버전, 보통 12.4)을 쓰게 LD_LIBRARY_PATH 설정.
+# 구드라이버(Elice 실측: 드라이버 12.2) 박스서도 12.4 빌드 바이너리가 돌게 하는 핵심(torch 와 동일 런타임).
+TORCH_LIBS="$(python - <<'PY' 2>/dev/null
+import os, glob
+try:
+    import nvidia
+    b = os.path.dirname(nvidia.__file__)
+    print(":".join(sorted({os.path.dirname(p) for p in glob.glob(b + "/*/lib/*.so*")})))
+except Exception:
+    pass
+PY
+)"
+if [ -n "$TORCH_LIBS" ]; then
+  export LD_LIBRARY_PATH="$TORCH_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  # 새 셸(수동 기동)에서도 되게 bashrc 에 한 줄(idempotent)
+  grep -q 'callone: torch CUDA libs' ~/.bashrc 2>/dev/null || \
+    echo "export LD_LIBRARY_PATH=\"$TORCH_LIBS\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}\"  # callone: torch CUDA libs" >> ~/.bashrc
+fi
+
+# ── 2. llama-server: 있으면 스킵 / URL 주면 다운 / 아니면 컴파일 ───────────
+#   ⚠️ --version 통과 ≠ GPU 동작(커널이미지 호환은 실제 모델 로드해야 드러남) → step5 에서 GPU
+#      검증 후 실패 시(다운본일 때만) 자동 재빌드. DL_FROM_URL 로 출처 추적.
+DL_OK=0; DL_FROM_URL=0
 if [ -x "$LBIN" ] && "$LBIN" --version >/dev/null 2>&1; then
   echo "[2/5] llama-server 있음 → 빌드 스킵 ($LBIN)"; DL_OK=1
 elif [ -n "$LLAMA_SERVER_URL" ]; then
@@ -56,18 +79,17 @@ elif [ -n "$LLAMA_SERVER_URL" ]; then
   if curl -fSL "$LLAMA_SERVER_URL" -o /tmp/llama-bin.tgz \
      && tar -xzf /tmp/llama-bin.tgz -C "$(dirname "$LBIN")"; then
     chmod +x "$LBIN" 2>/dev/null || true
-    # 글ibc/CUDA 호환 안 되면 추출은 돼도 실행이 안 된다 → --version 으로 실제 동작 검사.
     if [ -x "$LBIN" ] && "$LBIN" --version >/dev/null 2>&1; then
-      echo "   ✅ 프리빌트 동작 OK → 컴파일 생략"; DL_OK=1
+      echo "   프리빌트 실행 가능 → GPU 동작은 기동 시 검증(실패하면 자동 재빌드)"; DL_OK=1; DL_FROM_URL=1
     else
-      echo "   ⚠️ 프리빌트가 이 이미지서 실행 안 됨(CUDA/glibc 불일치) → 컴파일로 폴백"
+      echo "   ⚠️ 프리빌트 실행 불가(glibc 불일치) → 컴파일로 폴백"
     fi
   else
     echo "   ⚠️ 다운로드/해제 실패 → 컴파일로 폴백"
   fi
 fi
 if [ "$DL_OK" != "1" ]; then
-  echo "[2/5] llama-server 컴파일(native 아키)... (끝나면 pack 안내 출력 — 다음 인스턴스용)"
+  echo "[2/5] llama-server 드라이버호환 컴파일... (torch CUDA 버전에 맞춤)"
   bash scripts/build_llama_cuda.sh
 fi
 
@@ -91,18 +113,33 @@ else
   echo "       (없으면 TTS 가 Piper 로 폴백한다)"
 fi
 
-# ── 5. llama-server 기동 + health (NO_SERVE=1 이면 생략) ───────────────────
+# ── 5. llama-server 기동 + GPU 검증 (NO_SERVE=1 이면 생략) ─────────────────
+_health() { curl -s "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q '"status"'; }
+_start_verify() {   # 0=정상 / 2=CUDA에러 / 1=기타실패
+  pkill -f llama-server 2>/dev/null; sleep 2
+  nohup "$LBIN" -m "$GGUF" --host 127.0.0.1 --port "$PORT" \
+    -c 8192 -n 512 --n-gpu-layers 99 > "$CALLONE_HOME/llama.log" 2>&1 &
+  for _ in $(seq 1 90); do
+    _health && return 0
+    grep -qiE 'CUDA error|kernel image is invalid|out of memory' "$CALLONE_HOME/llama.log" && return 2
+    sleep 1
+  done
+  return 1
+}
 if [ "${NO_SERVE:-0}" != "1" ]; then
-  if curl -s http://127.0.0.1:8080/health 2>/dev/null | grep -q '"status"'; then
-    echo "[5/5] llama-server 이미 떠있음"
+  if _health; then
+    echo "[5/5] llama-server 이미 :$PORT 에 떠있음"
   elif [ -n "$GGUF" ] && [ -x "$LBIN" ]; then
-    echo "[5/5] llama-server 기동(:8080)..."
-    nohup "$LBIN" -m "$GGUF" --host 127.0.0.1 --port 8080 \
-      -c 8192 -n 512 --n-gpu-layers 99 > "$CALLONE_HOME/llama.log" 2>&1 &
-    for i in $(seq 1 30); do
-      curl -s http://127.0.0.1:8080/health 2>/dev/null | grep -q '"status"' && break; sleep 1; done
+    echo "[5/5] llama-server 기동(:$PORT) + GPU 검증..."
+    rc=0; _start_verify || rc=$?
+    if [ "$rc" = "2" ] && [ "$DL_FROM_URL" = "1" ]; then
+      echo "   ⚠️ 프리빌트가 이 드라이버서 GPU 동작 실패(CUDA error) → 드라이버 호환 재빌드 후 재기동"
+      rm -f "$LBIN"; bash scripts/build_llama_cuda.sh; DL_FROM_URL=0
+      rc=0; _start_verify || rc=$?
+    fi
+    if _health; then echo "   ✅ llama-server OK (:$PORT)"
+    else echo "   ⚠️ llama-server 안 뜸(rc=$rc) — 로그:"; tail -8 "$CALLONE_HOME/llama.log"; fi
   fi
-  curl -s http://127.0.0.1:8080/health ; echo
 fi
 
 cat <<EOF
@@ -113,8 +150,8 @@ cat <<EOF
     callone-bench --speaker $SPK --turns 5 --text "여보세요, 밥은 먹었어?"   # 지연 실측
     GRADIO_SHARE=1 python -m studio                                          # 브라우저 통화
 
-  ※ 인스턴스를 또 지울 거면 — 이번에 컴파일한 바이너리를 한 번만 올려두면 다음부턴 컴파일 0:
+  ※ 새로 컴파일됐다면(프리빌트 폴백 등) — 이 바이너리를 올려두면 다음 인스턴스부턴 컴파일 0:
     tar czf /tmp/llama-bin.tgz -C "$(dirname "$LBIN")" .
-    # 이 tgz 를 본인 저장소(HF/S3/깃릴리스 등)에 올린 URL 을 다음 인스턴스서:
-    #   LLAMA_SERVER_URL=<그 URL> bash scripts/bootstrap_gpu.sh
+    hf upload ksiwon/callone-llama-bin /tmp/llama-bin.tgz llama-bin.tgz   # HF write 토큰 로그인 필요
+    # (LLAMA_SERVER_URL 기본값이 이 repo → 다음 인스턴스는 자동 다운. 드라이버 안 맞으면 자동 재빌드.)
 EOF
