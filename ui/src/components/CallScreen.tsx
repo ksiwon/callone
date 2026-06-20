@@ -67,7 +67,9 @@ export default function CallScreen() {
   const historyRef = useRef<Turn[]>([]);
 
   const sockRef = useRef<CallSocket | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);     // 마이크 캡처(16kHz)
+  const playCtxRef = useRef<AudioContext | null>(null);      // 재생 전용(24kHz, TTS 출력 sr)
+  const playheadRef = useRef<number>(0);                     // 다음 청크 재생 시작시각(누적)
   const cleanupMicRef = useRef<() => void>(() => {});
 
   // 저장된 대화 불러오기(이어하기 편의)
@@ -141,17 +143,26 @@ export default function CallScreen() {
   }
 
   function playPcm(pcm: Float32Array) {
-    const ctx = audioCtxRef.current ?? new AudioContext();
+    // 전용 24kHz 컨텍스트(마이크 16kHz 컨텍스트서 재생하면 리샘플 왜곡=기계음).
+    let ctx = playCtxRef.current;
+    if (!ctx) { ctx = new AudioContext({ sampleRate: 24000 }); playCtxRef.current = ctx; }
+    if (ctx.state === "suspended") ctx.resume();
     const buf = ctx.createBuffer(1, pcm.length, 24000);   // Qwen3-TTS 출력 sr
     buf.copyToChannel(pcm, 0);
     const node = ctx.createBufferSource();
-    node.buffer = buf; node.connect(ctx.destination); node.start();
+    node.buffer = buf; node.connect(ctx.destination);
+    // 청크를 "지금"이 아니라 직전 청크 끝(playhead)에 이어붙여 순차재생 → 겹침/기계음 제거.
+    const start = Math.max(ctx.currentTime + 0.02, playheadRef.current);
+    node.start(start);
+    playheadRef.current = start + buf.duration;
   }
   function toggleMute() { mutedRef.current = !mutedRef.current; setMuted(mutedRef.current); }
 
   function endCall() {
     cleanupMicRef.current();
     sockRef.current?.stop();          // 서버가 인메모리 개인데이터 폐기
+    try { playCtxRef.current?.close(); } catch { /* noop */ }
+    playCtxRef.current = null; playheadRef.current = 0;
     nav("/");
   }
 
