@@ -89,6 +89,8 @@ export default function CallScreen() {
   }
 
   async function startCall() {
+    setStarted(true);
+    setStatus("연결 중…");
     const sock = new CallSocket(id, {
       onAudio: (pcm) => playPcm(pcm),
       onReply: (text, latency) => {
@@ -129,11 +131,10 @@ export default function CallScreen() {
       cleanupMicRef.current = () => {
         proc.disconnect(); src.disconnect(); stream.getTracks().forEach((tr) => tr.stop());
       };
-      setStatus("통화 중");
+      // 상태는 onReady(session_ready)/첫 응답에서 '통화 중'으로 — 여기선 마이크만 준비.
     } catch {
       setStatus("마이크 권한 필요(HTTPS/localhost)");
     }
-    setStarted(true);
   }
 
   function playPcm(pcm: Float32Array) {

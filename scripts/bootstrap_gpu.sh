@@ -39,9 +39,9 @@ for kv in "CALLONE_HOME=$CALLONE_HOME" "HF_HOME=$HF_HOME" "CALLONE_TIER=$CALLONE
   grep -q "export ${kv%%=*}=" ~/.bashrc 2>/dev/null || echo "export $kv" >> ~/.bashrc
 done
 
-# llama-server 포트($PORT)를 serve.yaml(llm.base_url)에도 반영 → callone-bench/studio/serve 가 같은 포트.
-# (Elice 처럼 8080 이 점유돼 PORT=8090 으로 띄울 때 자동 동기. 8080 이면 그대로.)
-sed -i -E "s#(127\.0\.0\.1:)[0-9]+#\1$PORT#" configs/serve.yaml 2>/dev/null || true
+# llama-server 포트($PORT)를 serve.yaml llm.base_url 에만 반영(llama-server 주석 달린 줄).
+# ⚠️ 전역 치환하면 avatar.base_url(8091)까지 덮어써 아바타가 llama 를 보는 버그 → 줄 스코프 필수.
+sed -i -E "/llama-server/ s#(127\.0\.0\.1:)[0-9]+#\1$PORT#" configs/serve.yaml 2>/dev/null || true
 
 # ── 1. 서빙 venv (있으면 스킵) ─────────────────────────────────────────────
 if [ ! -d .venv-serve ]; then
