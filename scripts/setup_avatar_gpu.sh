@@ -39,7 +39,7 @@ pip install --index-url "$CUDA_INDEX" torch torchaudio
 # Ditto environment.yaml pip 의존성 전체(PyTorch 백엔드 기준 — TRT 전용 tensorrt/polygraphy 제외).
 pip install librosa opencv-python-headless imageio imageio-ffmpeg scikit-image tqdm "numpy<2.4" \
   filetype cython cuda-python colored numba scikit-learn scipy audioread soxr pooch \
-  lazy-loader joblib msgpack tifffile decorator llvmlite
+  lazy-loader joblib msgpack tifffile decorator llvmlite onnxruntime
 # Ditto repo 자체 requirements 가 있으면 추가(저자 의도 — 버전 충돌나면 위 핀 유지).
 [ -f "$DITTO_REPO/requirements.txt" ] && pip install -r "$DITTO_REPO/requirements.txt" || true
 
