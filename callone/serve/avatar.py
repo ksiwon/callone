@@ -180,29 +180,50 @@ class DittoAvatar:
             f"{self.ws_url}/session/{self.session_id}/stream", timeout=self.timeout)
         return self._ws
 
+    def _reset_ws(self):
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self._ws = None
+
     def frames_for(self, audio: np.ndarray, sr: int) -> Iterator[bytes]:
         """오디오 청크 → avatar-server WS 로 보내고 JPEG 프레임 받아 yield.
-        프로토콜: 청크(f32 bytes) 업 → 서버가 프레임들(binary) 후 {"type":"chunk_done"}(text)."""
+        프로토콜: 청크(f32 bytes) 업 → 서버가 프레임들(binary) 후 {"type":"chunk_done"}(text).
+        멀티턴 견고화: 보내기 실패(끊긴 WS=서버 ping drop 등)면 **재연결+재시도 1회**, 수신 중
+        끊기면 그 턴 영상만 포기하고 WS 리셋(다음 턴 새 연결). 음성은 영향 없음."""
         self._interrupt.clear()
-        ws = self._ensure_ws()
-        ws.send_binary(np.asarray(audio, dtype=np.float32).tobytes())
-        while True:
-            if self._interrupt.is_set():
-                try:
-                    ws.send(json.dumps({"type": "interrupt"}))
-                except Exception:  # noqa: BLE001
-                    pass
-                break
-            op = ws.recv()
-            if isinstance(op, (bytes, bytearray)):
-                if op:
-                    yield bytes(op)
-            else:  # text = 제어
-                try:
-                    if json.loads(op).get("type") == "chunk_done":
-                        break
-                except Exception:  # noqa: BLE001
-                    break
+        data = np.asarray(audio, dtype=np.float32).tobytes()
+        for attempt in (1, 2):
+            try:
+                ws = self._ensure_ws()
+                ws.send_binary(data)
+            except Exception as e:  # noqa: BLE001  보내기 실패 → 재연결 후 재시도
+                self._reset_ws()
+                if attempt == 2:
+                    log.warning("avatar WS 재연결 실패(%s) — 영상 생략", e)
+                    return
+                continue
+            try:
+                while True:
+                    if self._interrupt.is_set():
+                        try:
+                            ws.send(json.dumps({"type": "interrupt"}))
+                        except Exception:  # noqa: BLE001
+                            pass
+                        return
+                    op = ws.recv()
+                    if isinstance(op, (bytes, bytearray)):
+                        if op:
+                            yield bytes(op)
+                    else:  # text = 제어
+                        if json.loads(op).get("type") == "chunk_done":
+                            return
+            except Exception as e:  # noqa: BLE001  수신 중 끊김 → 이 턴만 포기, 다음 턴 새 WS
+                log.warning("avatar 프레임 수신 끊김(%s) — 이 턴 영상 생략", e)
+                self._reset_ws()
+            return
 
     def interrupt(self) -> None:
         self._interrupt.set()

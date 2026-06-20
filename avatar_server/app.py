@@ -187,7 +187,10 @@ def main() -> None:
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8091)
     args = ap.parse_args()
-    uvicorn.run(create_app(), host=args.host, port=args.port)
+    # ws_ping_interval/timeout=None: 동기 Ditto 추론이 이벤트루프를 수 초 막아 ping 응답을 놓치면
+    # websockets 가 연결을 죽여(멀티턴 Broken pipe) → localhost 턴제라 ping 불필요, 비활성.
+    uvicorn.run(create_app(), host=args.host, port=args.port,
+                ws_ping_interval=None, ws_ping_timeout=None)
 
 
 if __name__ == "__main__":
