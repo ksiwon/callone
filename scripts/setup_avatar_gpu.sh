@@ -70,8 +70,10 @@ for root, _, files in os.walk('.'):
 missing = [m for m in sorted(mods) if importlib.util.find_spec(m) is None]
 pips = sorted({PIPMAP.get(m, m) for m in missing})
 print("누락:", missing, "→ 설치:", pips)
+# tensorrt 계열은 PyPI 소스스텁이 빌드 깨짐 → NVIDIA prebuilt 인덱스 추가(전체에 줘도 무해).
+NV = ['--extra-index-url', 'https://pypi.nvidia.com']
 for p in pips:
-    subprocess.run([sys.executable, '-m', 'pip', 'install', p])
+    subprocess.run([sys.executable, '-m', 'pip', 'install', p, *NV])
 PY
 ) || echo "[warn] import 스캔 생략(계속)"
 
