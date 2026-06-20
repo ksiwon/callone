@@ -25,6 +25,11 @@ const Log = styled.div`
   width: 100%; max-width: 480px; max-height: 30vh; overflow-y: auto;
   color: ${(p) => p.theme.colors.sub}; font-size: 14px;
 `;
+// 토킹헤드(영상통화) 화면 — avatar 프레임이 오면 표시. 없으면 파형 UI 유지.
+const Avatar = styled.img`
+  width: 256px; height: 256px; border-radius: 16px; object-fit: cover;
+  background: #000; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+`;
 const Controls = styled.div`display: flex; gap: 24px;`;
 const Btn = styled.button<{ danger?: boolean }>`
   width: 64px; height: 64px; border-radius: 50%; border: none; cursor: pointer;
@@ -39,6 +44,7 @@ export default function CallScreen() {
   const [status, setStatus] = useState("전화 거는 중…");
   const [muted, setMuted] = useState(false);
   const [log, setLog] = useState<string[]>([]);
+  const [frame, setFrame] = useState<string | null>(null);  // 토킹헤드 JPEG(base64)
   const sockRef = useRef<CallSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
@@ -51,6 +57,7 @@ export default function CallScreen() {
         setLog((l) => [...l, `${id}: ${text}  (${latency.toFixed(0)}ms)`]);
       },
       (pcm) => playPcm(pcm),
+      (jpegB64) => setFrame(jpegB64),   // avatar 프레임 → 영상통화 화면
     );
     sockRef.current = sock;
 
@@ -90,11 +97,15 @@ export default function CallScreen() {
         <Big>{id}</Big>
         <Status>{status} · {mm}:{ss}</Status>
       </Who>
-      <Wave active={status === "통화 중"}>
-        {Array.from({ length: 9 }).map((_, i) => (
-          <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />
-        ))}
-      </Wave>
+      {frame ? (
+        <Avatar src={`data:image/jpeg;base64,${frame}`} alt="avatar" />
+      ) : (
+        <Wave active={status === "통화 중"}>
+          {Array.from({ length: 9 }).map((_, i) => (
+            <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />
+          ))}
+        </Wave>
+      )}
       <Log>{log.map((l, i) => <div key={i}>{l}</div>)}</Log>
       <Controls>
         <Btn onClick={() => { setMuted((m) => !m); }}>{muted ? "음소거 해제" : "음소거"}</Btn>

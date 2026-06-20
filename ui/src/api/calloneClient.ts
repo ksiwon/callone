@@ -62,6 +62,8 @@ export class CallSocket {
     speakerId: string,
     private onReply: (text: string, latencyMs: number) => void,
     private onAudio: (pcm: Float32Array) => void,
+    // 토킹헤드(선택): avatar 켜져 있으면 JPEG 프레임이 base64 로 온다. 영상통화 화면 렌더용.
+    private onFrame?: (jpegB64: string) => void,
   ) {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     this.ws = new WebSocket(`${proto}://${location.host}/ws/call/${speakerId}`);
@@ -70,6 +72,7 @@ export class CallSocket {
       if (typeof e.data === "string") {
         const msg = JSON.parse(e.data);
         if (msg.type === "reply") this.onReply(msg.text, msg.latency_ms);
+        else if (msg.type === "frame" && this.onFrame) this.onFrame(msg.jpeg_b64);
       } else {
         this.onAudio(new Float32Array(e.data));
       }
