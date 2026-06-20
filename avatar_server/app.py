@@ -163,8 +163,14 @@ def create_app():
                         break
                 elif "bytes" in msg and msg["bytes"] is not None:
                     audio = np.frombuffer(msg["bytes"], dtype=np.float32)
-                    for fr in model.frames(audio, sr):
-                        await ws.send_bytes(fr)
+                    # 한 턴 프레임 생성이 실패해도 WS 는 유지(다음 턴 계속) — 멀티턴 안정.
+                    try:
+                        for fr in model.frames(audio, sr):
+                            await ws.send_bytes(fr)
+                    except Exception as e:  # noqa: BLE001
+                        import traceback
+                        print(f"[avatar] frames 오류(이 턴 영상 생략): {e}")
+                        traceback.print_exc()
                     await ws.send_text(json.dumps({"type": "chunk_done"}))
         except WebSocketDisconnect:
             pass
