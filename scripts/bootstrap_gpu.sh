@@ -121,8 +121,10 @@ fi
 _health() { curl -s "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q '"status"'; }
 _start_verify() {   # 0=정상 / 2=CUDA에러 / 1=기타실패
   pkill -f llama-server 2>/dev/null; sleep 2
+  # --reasoning-budget 0 : Qwen3.5 thinking(추론) 서버레벨 OFF. 안 끄면 출력이 reasoning_content
+  #   로만 가고 content 가 비어 **응답이 빈 채로 옴**(실측: LLM 완료 0자). (구버전 빌드면 --jinja 와 함께)
   nohup "$LBIN" -m "$GGUF" --host 127.0.0.1 --port "$PORT" \
-    -c 8192 -n 512 --n-gpu-layers 99 > "$CALLONE_HOME/llama.log" 2>&1 &
+    -c 8192 -n 512 --n-gpu-layers 99 --reasoning-budget 0 > "$CALLONE_HOME/llama.log" 2>&1 &
   for _ in $(seq 1 90); do
     _health && return 0
     grep -qiE 'CUDA error|kernel image is invalid|out of memory' "$CALLONE_HOME/llama.log" && return 2
