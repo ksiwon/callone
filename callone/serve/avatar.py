@@ -129,6 +129,8 @@ class DittoAvatar:
         self.resolution = int(acfg.get("resolution", 256))
         self.sr = int(acfg.get("sr", 24000))   # TTS 출력 sr(오디오 청크)
         self.timeout = float(acfg.get("timeout", 30.0))
+        # WS recv 타임아웃은 크게: 첫 턴 콜드(TRT 첫 추론 ~수십초) 동안 프레임 기다려야(짧으면 끊겨 0프레임).
+        self.ws_timeout = float(acfg.get("ws_timeout", 120.0))
         self.session_id: str | None = None
         self._ws = None
         self._interrupt = threading.Event()
@@ -177,7 +179,7 @@ class DittoAvatar:
         if not self.session_id:
             raise RuntimeError("start_call 먼저 — session 없음")
         self._ws = websocket.create_connection(
-            f"{self.ws_url}/session/{self.session_id}/stream", timeout=self.timeout)
+            f"{self.ws_url}/session/{self.session_id}/stream", timeout=self.ws_timeout)
         return self._ws
 
     def _reset_ws(self):

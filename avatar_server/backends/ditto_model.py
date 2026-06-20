@@ -80,7 +80,6 @@ class DittoModel(AvatarModel):
         self.resolution = 256
         self.sink: _FrameSink | None = None
         self._lock = threading.Lock()
-        self._warm_done = threading.Event(); self._warm_done.set()   # start() 가 예열 시 리셋
 
     def start(self, image_bytes: bytes, fps: int, resolution: int) -> None:
         self.resolution = int(resolution)
@@ -94,19 +93,8 @@ class DittoModel(AvatarModel):
         # 프레임 싱크로 writer 바꿔치기 → 파일 대신 우리 큐로.
         self.sink = _FrameSink()
         self.sdk.writer = self.sink            # [V] attribute 명 self.writer 확인
-        # 콜드스타트 예열을 **백그라운드**로(첫 추론 CUDA graph 캡처가 수십초 → /session/start HTTP 를
-        # 막으면 serve 가 timeout → 영상 꺼짐). start 는 즉시 반환하고, frames() 가 _warm_done 을 기다림
-        # (턴1 ASR+LLM+TTS 시간과 겹쳐 지연 숨겨짐).
-        self._warm_done = threading.Event()
-        threading.Thread(target=self._warmup_bg, daemon=True).start()
-
-    def _warmup_bg(self) -> None:
-        try:
-            self._warmup()
-        except Exception as e:  # noqa: BLE001
-            print(f"[ditto] 예열 생략({e})")
-        finally:
-            self._warm_done.set()
+        # 예열 안 함: 첫 턴은 콜드(TRT 첫 추론 ~수십초)지만 사용자 수용. 예열을 넣으면 드레인 경쟁/
+        # 클라 타임아웃과 엉켜 0프레임 났음(제거가 맞음). 첫 턴만 느리고 이후 RTF<1.
 
     def _feed(self, a16: np.ndarray) -> int:
         """16k 오디오를 온라인 청크 루프로 SDK 에 먹인다. 반환=예상 프레임수(num_f)."""
@@ -123,19 +111,6 @@ class DittoModel(AvatarModel):
                     chunk = np.pad(chunk, (0, split_len - len(chunk)))
                 self.sdk.run_chunk(chunk, chunksize)
         return num_f
-
-    def _warmup(self) -> None:
-        if self.sink is None:
-            return
-        num_f = self._feed(np.zeros(16000, dtype=np.float32))   # 1초 무음
-        got = 0
-        while got < num_f:                                      # 콜드 캡처 끝날 때까지 길게, 프레임은 버림
-            try:
-                if self.sink.q.get(timeout=30.0) is None:
-                    break
-            except queue.Empty:
-                break
-            got += 1
 
     def frames(self, audio: np.ndarray, sr: int):
         """**한 발화 전체 오디오**(임의 sr) → 16k → setup_Nd(프레임수) → 온라인 청크 루프 run_chunk
@@ -162,13 +137,13 @@ class DittoModel(AvatarModel):
                               np.arange(len(a)), a).astype("float32")
         if len(a) == 0:
             return
-        self._warm_done.wait(timeout=40)                      # 콜드 예열 끝나길 대기(턴1 prep 와 겹침)
         num_f = self._feed(a)                                  # setup_Nd + 청크 루프
-        # 워커가 비동기로 num_f 프레임 생성 → 모일 때까지 drain. 첫 프레임은 여유(콜드 잔여), 이후 짧게.
+        # 워커가 비동기로 num_f 프레임 생성 → 모일 때까지 drain. 첫 프레임은 콜드(TRT 첫추론 ~수십초)라
+        # 아주 길게(90s), 이후는 짧게(2s). (클라 WS 타임아웃도 이보다 커야 함 — avatar.py)
         got = 0
         while got < num_f:
             try:
-                fr = self.sink.q.get(timeout=(15.0 if got == 0 else 2.0))
+                fr = self.sink.q.get(timeout=(90.0 if got == 0 else 2.0))
             except queue.Empty:
                 break
             if fr is None:
