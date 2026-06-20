@@ -169,6 +169,29 @@ def _parse_emotion(text: str, default: str = "neutral") -> tuple[str, str]:
     return emotion, s
 
 
+# 입으로 말할 수 없는 것(이모지/괄호 해설) — TTS 가 읽거나 어색하게 새는 것 차단.
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F000-\U0001FAFF"   # 이모지·픽토그램 대부분
+    "\U00002600-\U000027BF"   # 기타기호·딩뱃
+    "\U00002B00-\U00002BFF"
+    "\U0001F1E6-\U0001F1FF"   # 국기
+    "\U00002190-\U000021FF"   # 화살표
+    "\U0000FE00-\U0000FE0F"   # variation selector
+    "\U0000200D"              # ZWJ
+    "\U00002022\U000025A0-\U000025FF"  # 불릿·기하기호
+    "]+", flags=re.UNICODE)
+
+
+def _strip_unspoken(text: str) -> str:
+    """입으로 못 읽는 것 제거: 괄호() 속 해설·행동·자기설명 + 이모지/이모티콘.
+    LLM 이 '(웃으며)', '(이모지는 상상이에요)', 😍 등을 흘리면 TTS 가 어색해짐 → 발화 직전 정제."""
+    text = re.sub(r"[(（][^()（）]*[)）]", "", text)   # 괄호 묶음(해설/행동/메타) 제거
+    text = _EMOJI_RE.sub("", text)                    # 이모지 제거
+    text = re.sub(r"[:;][-^]?[)D(P]", "", text)        # 기본 이모티콘 :) :D 등
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
 def _tts_stream_emo(tts, text: str, emotion: str):
     """TTS 백엔드가 emotion 인자를 지원하면 넘기고, 아니면 무시(폴백 호환)."""
     try:
@@ -396,6 +419,7 @@ class Orchestrator:
                 turn.interrupted = True
                 break
             emotion, clean = _parse_emotion(sentence, emotion)   # §4-1 감정 추출
+            clean = _strip_unspoken(clean)                       # 이모지·괄호해설 제거(입으로 못 읽는 것)
             if clean:
                 parts.append(clean)
         t_llm_done = time.time()
@@ -479,6 +503,7 @@ class Orchestrator:
                 yield ("interrupted", None); break
             raw_seen.append(sentence)
             emotion, clean = _parse_emotion(sentence, emotion)   # §4-1 감정 추출
+            clean = _strip_unspoken(clean)                       # 이모지·괄호해설 제거(입으로 못 읽는 것)
             if clean:
                 parts.append(clean)
         t_llm_done = time.time()
