@@ -22,23 +22,38 @@ const Wave = styled.div<{ active: boolean }>`
   }
   @keyframes bounce { 0%,100%{height:8px} 50%{height:40px} }
 `;
+/* ── 통화화면: 좌우 반반 split (좌=영상 꽉, 우=정보/채팅/버튼). 좁으면 세로 스택. ── */
+const Split = styled.div`
+  height: 100vh; display: flex; background: linear-gradient(180deg, #0e1726, #172234);
+  @media (max-width: 760px) { flex-direction: column; }
+`;
+const VideoSide = styled.div`
+  flex: 1; min-width: 0; min-height: 0; display: flex; align-items: center;
+  justify-content: center; background: #000; padding: 12px;
+`;
 const Avatar = styled.canvas`
-  /* 비율 유지(캔버스 내부 해상도=프레임 원본, CSS 로 축소). 긴 변 기준 화면 맞춤. */
-  width: auto; height: auto; max-width: min(48vw, 540px); max-height: 74vh;
-  border-radius: 16px; background: #000; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  width: auto; height: auto; max-width: 100%; max-height: 100%;   /* 좌측 꽉(비율 유지) */
+  border-radius: 12px;
 `;
-/* 통화화면 본문: 좌(대화/버튼) | 우(얼굴) 2단. 좁은 화면이면 세로로 쌓임. */
-const Stage = styled.div`
-  flex: 1; width: 100%; display: flex; gap: 28px; align-items: center;
-  justify-content: center; flex-wrap: wrap;
+const InfoSide = styled.div`
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  padding: 24px 20px; gap: 16px; color: ${(p) => p.theme.colors.text};
 `;
-const Panel = styled.div`
-  display: flex; flex-direction: column; gap: 16px;
-  flex: 1 1 320px; max-width: 480px; min-width: 280px;
+const Chat = styled.div`
+  flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
+  gap: 8px; padding-right: 4px;
 `;
-const Log = styled.div`
-  width: 100%; max-height: 44vh; overflow-y: auto;
-  color: ${(p) => p.theme.colors.sub}; font-size: 14px; line-height: 1.5;
+const Bubble = styled.div<{ me: boolean }>`
+  align-self: ${(p) => (p.me ? "flex-end" : "flex-start")};
+  max-width: 78%; padding: 9px 13px; border-radius: 16px; font-size: 14px; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word;
+  background: ${(p) => (p.me ? p.theme.colors.accent : p.theme.colors.surface)};
+  color: ${(p) => (p.me ? "#06202b" : p.theme.colors.text)};
+  ${(p) => (p.me ? "border-bottom-right-radius: 4px;" : "border-bottom-left-radius: 4px;")}
+`;
+const SysNote = styled.div`
+  align-self: center; font-size: 12px; color: ${(p) => p.theme.colors.sub};
+  padding: 2px 8px;
 `;
 const Controls = styled.div`display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;`;
 const Btn = styled.button<{ danger?: boolean }>`
@@ -66,7 +81,7 @@ export default function CallScreen() {
   const [status, setStatus] = useState("준비");
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
-  const [logLines, setLogLines] = useState<string[]>([]);
+  const [chat, setChat] = useState<{ who: "me" | "them" | "sys"; text: string }[]>([]);
 
   // 클라가 소유하는 개인데이터(서버 영속 0)
   const [voiceFile, setVoiceFile] = useState<File | null>(null);
@@ -107,18 +122,20 @@ export default function CallScreen() {
   async function startCall() {
     setStarted(true);
     setStatus("연결 중…");
+    // 이어하기: 저장된 이력을 채팅 말풍선으로 미리 표시(user=나, assistant=상대).
+    setChat(historyRef.current.map((m) => ({ who: (m.role === "user" ? "me" : "them") as "me" | "them", text: m.content })));
     const sock = new CallSocket(id, {
       // A/V 동기: 오디오·프레임을 턴 버퍼에 모았다가 audio_end 에서 동시에 재생.
       onAudio: (pcm) => { turnAudioRef.current.push(pcm); },
       onReply: (text, latency) => {
         historyRef.current.push({ role: "assistant", content: text }); persist();
         setStatus("통화 중");
-        const lat = typeof latency === "number" ? `  (${latency.toFixed(0)}ms)` : "";
-        setLogLines((l) => [...l, `${id}: ${text}${lat}`]);
+        void latency;
+        setChat((c) => [...c, { who: "them", text }]);
       },
       onUser: (text) => {
         if (text.trim()) { historyRef.current.push({ role: "user", content: text }); persist();
-          setLogLines((l) => [...l, `나: ${text}`]); }
+          setChat((c) => [...c, { who: "me", text }]); }
       },
       onFrame: (jpegB64) => { turnFramesRef.current.push(jpegB64); },
       onAudioEnd: () => playTurn(),
@@ -235,15 +252,15 @@ export default function CallScreen() {
   }
   function importHistory(file: File) {
     file.text().then((t) => {
-      try { historyRef.current = JSON.parse(t); persist(); setLogLines((l) => [...l, `(대화 ${historyRef.current.length}개 불러옴)`]); }
-      catch { setLogLines((l) => [...l, "(불러오기 실패: JSON 아님)"]); }
+      try { historyRef.current = JSON.parse(t); persist(); setChat((c) => [...c, { who: "sys", text: `대화 ${historyRef.current.length}개 불러옴` }]); }
+      catch { setChat((c) => [...c, { who: "sys", text: "불러오기 실패: JSON 아님" }]); }
     });
   }
   function clearHistory() {
     // 이전 대화 기억 전부 삭제(브라우저 보관분). 통화 시작 시 백엔드엔 빈 history 가 가므로 깨끗이 새 대화.
     historyRef.current = [];
     try { localStorage.removeItem(HKEY); } catch { /* noop */ }
-    setLogLines((l) => [...l, "(기억 리셋됨 — 새 대화로 시작)"]);  // 상태변경 → 재렌더(턴수 0 반영)
+    setChat([{ who: "sys", text: "기억 리셋됨 — 새 대화로 시작" }]);  // 상태변경 → 재렌더(턴수 0 반영)
   }
 
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
@@ -277,20 +294,10 @@ export default function CallScreen() {
     );
   }
 
-  // ---- 통화 화면 ----
+  // ---- 통화 화면: 좌=영상 / 우=정보·채팅·버튼 ----
   return (
-    <Screen>
-      <Who><Big>{id}</Big><Status>{status} · {mm}:{ss}</Status></Who>
-      <Stage>
-        <Panel>
-          <Log>{logLines.map((l, i) => <div key={i}>{l}</div>)}</Log>
-          <Controls>
-            <Btn onClick={toggleMute}>{muted ? "음소거 해제" : "음소거"}</Btn>
-            <Btn onClick={() => sockRef.current?.endTurn()}>응답 전송</Btn>
-            <Btn onClick={exportHistory}>대화 내보내기</Btn>
-            <Btn danger onClick={endCall}>종료</Btn>
-          </Controls>
-        </Panel>
+    <Split>
+      <VideoSide>
         {hasVideo ? (
           <Avatar ref={canvasRef} />
         ) : (
@@ -298,7 +305,21 @@ export default function CallScreen() {
             {Array.from({ length: 9 }).map((_, i) => <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />)}
           </Wave>
         )}
-      </Stage>
-    </Screen>
+      </VideoSide>
+      <InfoSide>
+        <Who><Big>{id}</Big><Status>{status} · {mm}:{ss}</Status></Who>
+        <Chat>
+          {chat.map((c, i) => c.who === "sys"
+            ? <SysNote key={i}>{c.text}</SysNote>
+            : <Bubble key={i} me={c.who === "me"}>{c.text}</Bubble>)}
+        </Chat>
+        <Controls>
+          <Btn onClick={toggleMute}>{muted ? "음소거 해제" : "음소거"}</Btn>
+          <Btn onClick={() => sockRef.current?.endTurn()}>응답 전송</Btn>
+          <Btn onClick={exportHistory}>대화 내보내기</Btn>
+          <Btn danger onClick={endCall}>종료</Btn>
+        </Controls>
+      </InfoSide>
+    </Split>
   );
 }
