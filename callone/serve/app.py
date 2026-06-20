@@ -197,7 +197,12 @@ def create_app():
                             break
                 elif "bytes" in msg and msg["bytes"]:
                     if gen_task and not gen_task.done():
-                        orch.interrupt()                 # 응답 송출 중 사용자가 말하면 barge-in
+                        # 응답 생성·재생 중 들어오는 오디오 = 마이크가 계속 흘리는 에코/무음.
+                        # 이걸 barge-in(orch.interrupt())으로 보면 **턴 시작 직후 자기 응답을
+                        # 즉시 끊어** 0자가 된다(실측 근본원인). 버튼 UX(응답 전송)라 자동 barge-in
+                        # 불필요 → 생성 중 바이트는 버퍼링도 인터럽트도 안 하고 버린다.
+                        # 진짜 끊기는 명시적 'interrupt'/'stop' 제어 메시지로만.
+                        continue
                     buf.append(np.frombuffer(msg["bytes"], dtype=np.float32))
         except WebSocketDisconnect:
             log.info("통화 종료 speaker=%s", speaker_id)
