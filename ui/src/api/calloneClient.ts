@@ -55,15 +55,31 @@ export async function getSamples(id: string): Promise<any[]> {
   return r.ok ? r.json() : [];
 }
 
+// 대화 한 턴(클라가 소유·export/import. 서버엔 안 남음).
+export interface Turn { role: "user" | "assistant"; content: string }
+
+// 통화 시작 시 프론트가 보내는 개인데이터(전부 클라 소유 → 서버는 인메모리만).
+export interface SessionInit {
+  ref_audio_b64?: string;   // 화자 음성 파일 bytes(base64) — 목소리 복제
+  ref_text?: string;
+  portrait_b64?: string;    // 사진 파일 bytes(base64) — 얼굴
+  persona?: string;
+  situation?: string;
+  history?: Turn[];         // 이전 대화 복원(이어하기)
+}
+
 // 실시간 통화 WebSocket. 마이크 오디오(Float32) 업스트림, 음성 청크 다운스트림.
 export class CallSocket {
   private ws: WebSocket;
   constructor(
     speakerId: string,
-    private onReply: (text: string, latencyMs: number) => void,
-    private onAudio: (pcm: Float32Array) => void,
-    // 토킹헤드(선택): avatar 켜져 있으면 JPEG 프레임이 base64 로 온다. 영상통화 화면 렌더용.
-    private onFrame?: (jpegB64: string) => void,
+    private cb: {
+      onReply: (text: string, latencyMs: number) => void;
+      onAudio: (pcm: Float32Array) => void;
+      onUser?: (text: string) => void;       // 내 발화 전사(이력 기록용)
+      onFrame?: (jpegB64: string) => void;   // 토킹헤드 프레임
+      onReady?: () => void;                  // session_init 완료
+    },
   ) {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     this.ws = new WebSocket(`${proto}://${location.host}/ws/call/${speakerId}`);
@@ -71,12 +87,20 @@ export class CallSocket {
     this.ws.onmessage = (e) => {
       if (typeof e.data === "string") {
         const msg = JSON.parse(e.data);
-        if (msg.type === "reply") this.onReply(msg.text, msg.latency_ms);
-        else if (msg.type === "frame" && this.onFrame) this.onFrame(msg.jpeg_b64);
+        if (msg.type === "reply") this.cb.onReply(msg.text, msg.latency_ms);
+        else if (msg.type === "user") this.cb.onUser?.(msg.text);
+        else if (msg.type === "frame") this.cb.onFrame?.(msg.jpeg_b64);
+        else if (msg.type === "session_ready") this.cb.onReady?.();
       } else {
-        this.onAudio(new Float32Array(e.data));
+        this.cb.onAudio(new Float32Array(e.data));
       }
     };
+  }
+  // 통화 시작 — 개인데이터 전송(서버는 인메모리만, 끊으면 폐기).
+  sessionInit(payload: SessionInit) {
+    const send = () => this.ws.send(JSON.stringify({ type: "session_init", ...payload }));
+    if (this.ws.readyState === WebSocket.OPEN) send();
+    else this.ws.addEventListener("open", send, { once: true });
   }
   sendAudio(pcm: Float32Array) {
     if (this.ws.readyState === WebSocket.OPEN) this.ws.send(pcm.buffer);
@@ -85,7 +109,17 @@ export class CallSocket {
     this.ws.send(JSON.stringify({ type: "end_turn" }));
   }
   stop() {
-    this.ws.send(JSON.stringify({ type: "stop" }));
+    try { this.ws.send(JSON.stringify({ type: "stop" })); } catch { /* noop */ }
     this.ws.close();
   }
+}
+
+// 파일 → base64(데이터URL 접두 제거). 음성/사진 전송용.
+export function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
 }
