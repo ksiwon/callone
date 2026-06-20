@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import io
+import json
 import threading
 from pathlib import Path
 from typing import Iterator, Protocol, runtime_checkable
@@ -113,10 +114,13 @@ class DittoAvatar:
     def __init__(self, cfg: dict | None = None, probe: bool = True):
         acfg = cfg or {}
         self.base_url = str(acfg.get("base_url", "http://127.0.0.1:8091")).rstrip("/")
+        self.ws_url = self.base_url.replace("http://", "ws://").replace("https://", "wss://")
         self.fps = int(acfg.get("fps", 25))
         self.resolution = int(acfg.get("resolution", 256))
+        self.sr = int(acfg.get("sr", 24000))   # TTS 출력 sr(오디오 청크)
         self.timeout = float(acfg.get("timeout", 30.0))
         self.session_id: str | None = None
+        self._ws = None
         self._interrupt = threading.Event()
         if probe:
             self._probe()
@@ -143,23 +147,60 @@ class DittoAvatar:
             raise RuntimeError(f"avatar 사진 없음: {image_path!r}")
         img_b64 = base64.b64encode(Path(image_path).read_bytes()).decode()
         body = json.dumps({"image_b64": img_b64, "fps": self.fps,
-                           "resolution": self.resolution}).encode()
+                           "resolution": self.resolution, "sr": self.sr}).encode()
         req = urllib.request.Request(f"{self.base_url}/session/start", data=body,
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             self.session_id = json.loads(r.read().decode()).get("session_id")
         log.info("DittoAvatar 세션 시작: %s (사진 %s)", self.session_id, image_path)
 
+    def _ensure_ws(self):
+        """세션 WS 를 lazy 연결(청크마다 재사용). websocket-client 필요."""
+        if self._ws is not None:
+            return self._ws
+        import websocket  # type: ignore  # pip install websocket-client
+
+        if not self.session_id:
+            raise RuntimeError("start_call 먼저 — session 없음")
+        self._ws = websocket.create_connection(
+            f"{self.ws_url}/session/{self.session_id}/stream", timeout=self.timeout)
+        return self._ws
+
     def frames_for(self, audio: np.ndarray, sr: int) -> Iterator[bytes]:
-        # ⚠️ avatar-server WS 스트리밍 구현 후 연결(GPU 단계). 지금은 미구현 → 폴백 유도.
-        raise NotImplementedError(
-            "DittoAvatar.frames_for 는 avatar-server(Ditto) 구현 후 WS 로 연결 — "
-            "현재는 StaticImage 폴백 사용")
+        """오디오 청크 → avatar-server WS 로 보내고 JPEG 프레임 받아 yield.
+        프로토콜: 청크(f32 bytes) 업 → 서버가 프레임들(binary) 후 {"type":"chunk_done"}(text)."""
+        self._interrupt.clear()
+        ws = self._ensure_ws()
+        ws.send_binary(np.asarray(audio, dtype=np.float32).tobytes())
+        while True:
+            if self._interrupt.is_set():
+                try:
+                    ws.send(json.dumps({"type": "interrupt"}))
+                except Exception:  # noqa: BLE001
+                    pass
+                break
+            op = ws.recv()
+            if isinstance(op, (bytes, bytearray)):
+                if op:
+                    yield bytes(op)
+            else:  # text = 제어
+                try:
+                    if json.loads(op).get("type") == "chunk_done":
+                        break
+                except Exception:  # noqa: BLE001
+                    break
 
     def interrupt(self) -> None:
         self._interrupt.set()
 
     def stop(self) -> None:
+        if self._ws is not None:
+            try:
+                self._ws.send(json.dumps({"type": "stop"}))
+                self._ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._ws = None
         if not self.session_id:
             return
         import urllib.request
