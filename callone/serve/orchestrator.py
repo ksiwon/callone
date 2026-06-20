@@ -462,17 +462,25 @@ class Orchestrator:
         #    문장별 독립 합성은 운율 불연속(톤 튐)으로 음색이 덜 닮음 → 통째 1회가 충실도 최선.
         emotion = "neutral"
         parts: list[str] = []
+        raw_seen: list[str] = []
         t_llm_first = 0.0
         for sentence in self.llm.chat_stream(user_text, self.history):
             if not t_llm_first:
                 t_llm_first = time.time()
             if self._interrupt.is_set():
                 yield ("interrupted", None); break
+            raw_seen.append(sentence)
             emotion, clean = _parse_emotion(sentence, emotion)   # §4-1 감정 추출
             if clean:
                 parts.append(clean)
         t_llm_done = time.time()
         reply = " ".join(parts)
+        if not reply:
+            # 0자 원인 규명(실패 시에만): 모델이 뭘 뱉었는지 원시 문장(AI 출력, 60자컷)으로 확인.
+            #   raw 비었으면=LLM 빈손, raw 찼는데 reply 0자면=_parse_emotion 이 다 깎음(태그만 뱉음).
+            log.warning("LLM 0자 진단 — 원시 %d개 %r / persona주입=%s",
+                        len(raw_seen), [s[:60] for s in raw_seen],
+                        bool(getattr(self.llm, "_persona_override", None)))
         log.info("LLM 완료(%d자, %.0fms) → TTS 합성 시작", len(reply), (t_llm_done - t_asr) * 1000)  # 진단
         if reply and not self._interrupt.is_set():
             yield ("emotion", emotion)
