@@ -68,7 +68,6 @@ export default function CallScreen() {
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
   const [logLines, setLogLines] = useState<string[]>([]);
-  const [frame, setFrame] = useState<string | null>(null);
 
   // 클라가 소유하는 개인데이터(서버 영속 0)
   const [voiceFile, setVoiceFile] = useState<File | null>(null);
@@ -83,7 +82,9 @@ export default function CallScreen() {
   const playheadRef = useRef<number>(0);                     // 다음 청크 재생 시작시각(누적)
   const turnAudioRef = useRef<Float32Array[]>([]);           // 한 턴 오디오 버퍼(A/V 동기 재생용)
   const turnFramesRef = useRef<string[]>([]);                // 한 턴 프레임 버퍼(같은 턴)
-  const frameTimersRef = useRef<number[]>([]);               // 프레임 표시 타이머(중단 시 정리)
+  const imgRef = useRef<HTMLImageElement | null>(null);      // 프레임 직접 갱신(React 리렌더 우회=부드러움)
+  const rafRef = useRef<number | null>(null);                // 프레임 재생 rAF 루프(중단 시 취소)
+  const [hasVideo, setHasVideo] = useState(false);           // 영상 프레임 받은 적 있나(img vs 파형)
   const cleanupMicRef = useRef<() => void>(() => {});
 
   // 저장된 대화 불러오기(이어하기 편의)
@@ -163,10 +164,9 @@ export default function CallScreen() {
   function playTurn() {
     const chunks = turnAudioRef.current; turnAudioRef.current = [];
     const frames = turnFramesRef.current; turnFramesRef.current = [];
-    // 이전 턴 프레임 타이머 정리
-    frameTimersRef.current.forEach((t) => clearTimeout(t)); frameTimersRef.current = [];
-    if (!chunks.length) {                       // 오디오 없으면 프레임만이라도 표시
-      if (frames.length) setFrame(frames[frames.length - 1]);
+    if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    if (!chunks.length) {                       // 오디오 없으면 마지막 프레임만 표시
+      if (frames.length && imgRef.current) imgRef.current.src = `data:image/jpeg;base64,${frames[frames.length - 1]}`;
       return;
     }
     let ctx = playCtxRef.current;
@@ -182,15 +182,22 @@ export default function CallScreen() {
     node.buffer = buf; node.connect(ctx.destination);
     const startAt = ctx.currentTime + 0.08;
     node.start(startAt);
-    // 프레임을 오디오 시작에 맞춰 균등 스케줄(frames.length 개를 dur 초에 분산).
+    // 프레임: rAF 로 경과시간에 맞는 프레임을 골라 <img>.src 직접 갱신(setState 안 함 → 부드러움).
     if (frames.length) {
-      const leadMs = (startAt - ctx.currentTime) * 1000;
-      const base = performance.now() + leadMs;
-      frames.forEach((f, i) => {
-        const at = base + (i / frames.length) * dur * 1000;
-        const t = window.setTimeout(() => setFrame(f), Math.max(0, at - performance.now()));
-        frameTimersRef.current.push(t);
-      });
+      setHasVideo(true);
+      if (imgRef.current) imgRef.current.src = `data:image/jpeg;base64,${frames[0]}`;
+      const startPerf = performance.now() + (startAt - ctx.currentTime) * 1000;
+      let last = -1;
+      const tick = () => {
+        const el = (performance.now() - startPerf) / 1000;   // 오디오 경과(초)
+        if (el >= 0) {
+          const idx = Math.min(frames.length - 1, Math.max(0, Math.floor(el / dur * frames.length)));
+          if (idx !== last && imgRef.current) { imgRef.current.src = `data:image/jpeg;base64,${frames[idx]}`; last = idx; }
+        }
+        if (el < dur) rafRef.current = requestAnimationFrame(tick);
+        else rafRef.current = null;
+      };
+      rafRef.current = requestAnimationFrame(tick);
     }
   }
   function toggleMute() { mutedRef.current = !mutedRef.current; setMuted(mutedRef.current); }
@@ -198,7 +205,7 @@ export default function CallScreen() {
   function endCall() {
     cleanupMicRef.current();
     sockRef.current?.stop();          // 서버가 인메모리 개인데이터 폐기
-    frameTimersRef.current.forEach((t) => clearTimeout(t)); frameTimersRef.current = [];
+    if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     try { playCtxRef.current?.close(); } catch { /* noop */ }
     playCtxRef.current = null; playheadRef.current = 0;
     nav("/");
@@ -269,8 +276,8 @@ export default function CallScreen() {
             <Btn danger onClick={endCall}>종료</Btn>
           </Controls>
         </Panel>
-        {frame ? (
-          <Avatar src={`data:image/jpeg;base64,${frame}`} alt="avatar" />
+        {hasVideo ? (
+          <Avatar ref={imgRef} alt="avatar" />
         ) : (
           <Wave active={status === "통화 중"}>
             {Array.from({ length: 9 }).map((_, i) => <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />)}
