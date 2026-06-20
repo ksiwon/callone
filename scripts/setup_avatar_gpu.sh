@@ -87,7 +87,11 @@ PY
 # 너무 최신이라 'CUDA error 35(insufficient driver)'. 프리빌트 Ampere 엔진도 TRT 8.6 빌드라 8.6.1 로 맞춤.
 # cuda-python 은 옛 API('from cuda import cuda') 필요 → <12.9.
 pip uninstall -y tensorrt tensorrt-libs tensorrt-bindings tensorrt_cu12 tensorrt_cu12_libs tensorrt_cu12_bindings >/dev/null 2>&1 || true
-pip install tensorrt==8.6.1 "cuda-python<12.9" --extra-index-url https://pypi.nvidia.com
+# tensorrt 메타패키지는 빌드 중 내부에서 pip 호출하다 격리env 서 깨짐 → libs/bindings 직접 설치 후
+# 메타는 --no-build-isolation 으로(이미 만족된 의존성 재호출 안 함).
+pip install --upgrade pip >/dev/null
+pip install tensorrt-libs==8.6.1 tensorrt-bindings==8.6.1 "cuda-python<12.9" --extra-index-url https://pypi.nvidia.com
+pip install tensorrt==8.6.1 --no-build-isolation --extra-index-url https://pypi.nvidia.com
 
 # env 고정 — DittoModel 이 이걸로 SDK 로드.
 # DATA_ROOT 는 aux_models/ 와 models/ 를 품은 디렉토리(=ditto_pytorch). aux_models(det_10g.onnx)의
