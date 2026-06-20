@@ -150,10 +150,12 @@ class LlamaPersonaLLM:
             "temperature": self.temperature,
             "stream": stream,
             # 반복 루프 방지("뭐. 뭐. 뭐." 등). LoRA 가 화자 A filler 물고 늘어지는 것 억제.
-            "repeat_penalty": 1.3,
-            "repeat_last_n": 256,        # 64→256: 여러 턴 전 표현까지 반복 억제(같은 질문 되풀이 방지)
-            "frequency_penalty": 0.5,
-            "presence_penalty": 0.7,     # 0.3→0.7: 새 화제·새 표현으로 밀어 주제고착/반복 완화
+            # ⚠️ 페널티 과하면 한국어 조사·어미 반복을 막아 문법 박살(실측: "그치마니/하렴 야호" 등 비문).
+            #    약하게만 — 같은 질문 반복은 프롬프트로 억제(페널티로 누르면 부작용 큼).
+            "repeat_penalty": 1.1,
+            "repeat_last_n": 64,
+            "frequency_penalty": 0.2,
+            "presence_penalty": 0.2,
             # Qwen3.5 thinking 끄기(짧고 빠른 전화 응답). 서버가 무시해도 _strip_think 가 처리.
             "chat_template_kwargs": {"enable_thinking": False},
         }
