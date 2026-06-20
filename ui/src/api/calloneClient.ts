@@ -39,8 +39,9 @@ export async function listSpeakers(): Promise<SpeakerSummary[]> {
   return r.json();
 }
 
-export async function getProfile(id: string): Promise<SpeakerProfile> {
+export async function getProfile(id: string): Promise<SpeakerProfile | null> {
   const r = await fetch(`${BASE}/api/speakers/${id}/profile`);
+  if (!r.ok) return null;          // 프로필 없으면(404) null — 편집기가 빈 응답으로 크래시하던 것 방지
   return r.json();
 }
 
