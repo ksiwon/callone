@@ -551,8 +551,12 @@ class Orchestrator:
                 if self.avatar is not None and seg_chunks and not self._interrupt.is_set():
                     try:
                         full_seg = np.concatenate(seg_chunks)
+                        t_av = time.time(); n_fr = 0
                         for fr in self.avatar.frames_for(full_seg, sr_out):
+                            n_fr += 1
                             yield ("frame", fr)
+                        log.info("아바타 %d프레임 %.0fms (오디오 %.1fs)", n_fr,
+                                 (time.time() - t_av) * 1000, len(full_seg) / max(1, sr_out))
                     except Exception as e:  # noqa: BLE001
                         log.warning("avatar 프레임 생성 오류(%s) — 영상 생략", e)
                         self.avatar = None
