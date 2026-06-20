@@ -83,6 +83,12 @@ for p in pips:
 PY
 ) || echo "[warn] import 스캔 생략(계속)"
 
+# TensorRT/cuda-python 버전 고정(중요): 스캔이 최신 TRT(11.x)를 깔면 Elice 드라이버(535=CUDA12.2)엔
+# 너무 최신이라 'CUDA error 35(insufficient driver)'. 프리빌트 Ampere 엔진도 TRT 8.6 빌드라 8.6.1 로 맞춤.
+# cuda-python 은 옛 API('from cuda import cuda') 필요 → <12.9.
+pip uninstall -y tensorrt tensorrt-libs tensorrt-bindings tensorrt_cu12 tensorrt_cu12_libs tensorrt_cu12_bindings >/dev/null 2>&1 || true
+pip install tensorrt==8.6.1 "cuda-python<12.9" --extra-index-url https://pypi.nvidia.com
+
 # env 고정 — DittoModel 이 이걸로 SDK 로드.
 # DATA_ROOT 는 aux_models/ 와 models/ 를 품은 디렉토리(=ditto_pytorch). aux_models(det_10g.onnx)의
 # 부모로 자동 탐지(고정 경로 'ditto_pytorch/models' 는 한 단계 깊어 det_10g 못 찾음 → 실측 버그).
