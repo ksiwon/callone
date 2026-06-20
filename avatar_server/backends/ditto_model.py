@@ -80,6 +80,7 @@ class DittoModel(AvatarModel):
         self.resolution = 256
         self.sink: _FrameSink | None = None
         self._lock = threading.Lock()
+        self._warm_done = threading.Event(); self._warm_done.set()   # start() 가 예열 시 리셋
 
     def start(self, image_bytes: bytes, fps: int, resolution: int) -> None:
         self.resolution = int(resolution)
@@ -93,12 +94,19 @@ class DittoModel(AvatarModel):
         # 프레임 싱크로 writer 바꿔치기 → 파일 대신 우리 큐로.
         self.sink = _FrameSink()
         self.sdk.writer = self.sink            # [V] attribute 명 self.writer 확인
-        # 콜드스타트 예열: 더미 1초로 1회 추론 → CUDA graph 캡처/모델 예열 → 첫 턴이 콜드로 프레임 0
-        # (영상 안 나옴) 되는 것 방지. 세션 시작(연결 중)에 처리되니 통화 지연엔 안 보임.
+        # 콜드스타트 예열을 **백그라운드**로(첫 추론 CUDA graph 캡처가 수십초 → /session/start HTTP 를
+        # 막으면 serve 가 timeout → 영상 꺼짐). start 는 즉시 반환하고, frames() 가 _warm_done 을 기다림
+        # (턴1 ASR+LLM+TTS 시간과 겹쳐 지연 숨겨짐).
+        self._warm_done = threading.Event()
+        threading.Thread(target=self._warmup_bg, daemon=True).start()
+
+    def _warmup_bg(self) -> None:
         try:
             self._warmup()
         except Exception as e:  # noqa: BLE001
             print(f"[ditto] 예열 생략({e})")
+        finally:
+            self._warm_done.set()
 
     def _feed(self, a16: np.ndarray) -> int:
         """16k 오디오를 온라인 청크 루프로 SDK 에 먹인다. 반환=예상 프레임수(num_f)."""
@@ -154,6 +162,7 @@ class DittoModel(AvatarModel):
                               np.arange(len(a)), a).astype("float32")
         if len(a) == 0:
             return
+        self._warm_done.wait(timeout=40)                      # 콜드 예열 끝나길 대기(턴1 prep 와 겹침)
         num_f = self._feed(a)                                  # setup_Nd + 청크 루프
         # 워커가 비동기로 num_f 프레임 생성 → 모일 때까지 drain. 첫 프레임은 여유(콜드 잔여), 이후 짧게.
         got = 0

@@ -179,6 +179,8 @@ def create_app():
         try:
             while True:                                  # 단일 수신자 — 여기서만 ws.receive()
                 msg = await ws.receive()
+                if msg.get("type") == "websocket.disconnect":   # 끊김 → 종료(재 receive 시 RuntimeError 방지)
+                    break
                 if "text" in msg and msg["text"]:
                     ctrl = json.loads(msg["text"])
                     t = ctrl.get("type")
