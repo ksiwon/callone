@@ -120,17 +120,17 @@ def create_app():
 
         from .orchestrator import Orchestrator
 
+        loop = asyncio.get_running_loop()
         if speaker_id not in _orchestrators:
             # 생성+워밍업(CUDA graph/ref 인코딩)은 수 초 → 이벤트 루프 막지 않게 executor 에서.
-            loop = asyncio.get_running_loop()
             _orchestrators[speaker_id] = await loop.run_in_executor(
                 None, Orchestrator, speaker_id)
         orch = _orchestrators[speaker_id]
         buf: list = []
+        gen_task = None     # 현재 응답 생성·송출 태스크(한 번에 하나)
 
-        async def _stream_reply(audio):
-            """생성 스레드 → 큐 → WS 송출. 송출 중 클라 메시지 수신 시 barge-in."""
-            loop = asyncio.get_running_loop()
+        async def _run_turn(audio):
+            """응답 생성(스레드) → 큐 → WS 송출. 이 코루틴은 **수신 안 함**(단일 수신자 규칙)."""
             q: asyncio.Queue = asyncio.Queue()
 
             def _producer():
@@ -139,22 +139,6 @@ def create_app():
                 loop.call_soon_threadsafe(q.put_nowait, ("_done", None))
 
             gen = loop.run_in_executor(None, _producer)
-
-            async def _watch_interrupt():
-                # 송출 중 사용자가 다시 말하면(오디오/interrupt) → 중단
-                try:
-                    while True:
-                        m = await ws.receive()
-                        if "text" in m and m["text"]:
-                            c = json.loads(m["text"])
-                            if c.get("type") in ("interrupt", "end_turn", "stop"):
-                                orch.interrupt(); return
-                        elif "bytes" in m and m["bytes"]:
-                            orch.interrupt(); return
-                except Exception:  # noqa: BLE001
-                    return
-
-            watcher = asyncio.ensure_future(_watch_interrupt())
             try:
                 while True:
                     kind, val = await q.get()
@@ -163,47 +147,63 @@ def create_app():
                     if kind == "audio":
                         await ws.send_bytes(val.astype(np.float32).tobytes())
                     elif kind == "frame":
-                        # 토킹헤드 JPEG 프레임 → base64 JSON(기존 오디오 바이너리와 구분, 비파괴).
                         import base64
                         await ws.send_text(json.dumps(
                             {"type": "frame", "jpeg_b64": base64.b64encode(val).decode()}))
                     elif kind == "text":
-                        await ws.send_text(json.dumps({"type": "reply", "text": val},
-                                                      ensure_ascii=False))
-                    elif kind == "user":   # 사용자 전사 → 클라가 대화이력(export)에 기록
-                        await ws.send_text(json.dumps({"type": "user", "text": val},
-                                                      ensure_ascii=False))
+                        await ws.send_text(json.dumps({"type": "reply", "text": val}, ensure_ascii=False))
+                    elif kind == "user":   # 사용자 전사 → 클라 대화이력(export)
+                        await ws.send_text(json.dumps({"type": "user", "text": val}, ensure_ascii=False))
                     elif kind == "latency":
                         await ws.send_text(json.dumps({"type": "latency_ms", "value": val}))
                     elif kind == "interrupted":
                         await ws.send_text(json.dumps({"type": "interrupted"}))
             finally:
-                watcher.cancel()
                 await gen
-                await ws.send_text(json.dumps({"type": "audio_end"}))
+                try:
+                    await ws.send_text(json.dumps({"type": "audio_end"}))
+                except Exception:  # noqa: BLE001
+                    pass
 
-        loop = asyncio.get_running_loop()
+        async def _finish_gen():
+            """진행 중 응답이 있으면 중단하고 끝까지 정리(동시 송출 2개 방지 — 직렬화)."""
+            nonlocal gen_task
+            if gen_task and not gen_task.done():
+                orch.interrupt()
+                try:
+                    await gen_task
+                except Exception:  # noqa: BLE001
+                    pass
+            gen_task = None
+
         try:
-            while True:
+            while True:                                  # 단일 수신자 — 여기서만 ws.receive()
                 msg = await ws.receive()
                 if "text" in msg and msg["text"]:
                     ctrl = json.loads(msg["text"])
-                    if ctrl.get("type") == "session_init":
-                        # 프라이버시: 프론트가 보낸 음성/사진/이력으로 세션 구성(전부 인메모리).
+                    t = ctrl.get("type")
+                    if t == "session_init":
                         kw = _parse_session_init(ctrl)
                         await loop.run_in_executor(None, lambda: orch.init_session(**kw))
                         await ws.send_text(json.dumps({"type": "session_ready"}))
-                    elif ctrl.get("type") == "end_turn":
+                    elif t == "end_turn":
+                        await _finish_gen()              # 이전 응답 정리 후 새 턴(직렬화)
                         audio = np.concatenate(buf) if buf else np.zeros(1, np.float32)
                         buf = []
-                        await _stream_reply(audio)
-                    elif ctrl.get("type") == "stop":
-                        break
+                        gen_task = asyncio.ensure_future(_run_turn(audio))
+                    elif t in ("interrupt", "stop"):
+                        orch.interrupt()
+                        if t == "stop":
+                            break
                 elif "bytes" in msg and msg["bytes"]:
+                    if gen_task and not gen_task.done():
+                        orch.interrupt()                 # 응답 송출 중 사용자가 말하면 barge-in
                     buf.append(np.frombuffer(msg["bytes"], dtype=np.float32))
         except WebSocketDisconnect:
             log.info("통화 종료 speaker=%s", speaker_id)
         finally:
+            if gen_task and not gen_task.done():
+                gen_task.cancel()
             # 프라이버시: 연결 끊기면 인메모리 개인데이터(ref tmpfs·이력·아바타) 즉시 폐기.
             try:
                 await loop.run_in_executor(None, orch.cleanup_session)
