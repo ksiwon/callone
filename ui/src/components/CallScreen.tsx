@@ -32,8 +32,8 @@ const VideoSide = styled.div`
   justify-content: center; background: #000; padding: 12px;
 `;
 const Avatar = styled.canvas`
-  width: auto; height: auto; max-width: 100%; max-height: 100%;   /* 좌측 꽉(비율 유지) */
-  border-radius: 12px;
+  /* 좌측 섹션을 꽉 채움: 비율 유지(contain)로 가로/세로 중 먼저 닿는 쪽까지 키움. */
+  width: 100%; height: 100%; object-fit: contain; border-radius: 12px;
 `;
 const InfoSide = styled.div`
   flex: 1; min-width: 0; display: flex; flex-direction: column;
