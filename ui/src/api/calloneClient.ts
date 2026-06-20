@@ -29,7 +29,9 @@ export interface SpeakerProfile {
   llm: any;
 }
 
-const BASE = ""; // vite 프록시로 /api, /ws → localhost:8000
+// 서브경로 배포(Elice /proxy/5173/) 대응: vite base(import.meta.env.BASE_URL)를 prefix 로.
+// 기본 '/' → BASE='' (localhost/직접노출). VITE_BASE=/proxy/5173/ → BASE='/proxy/5173'.
+const BASE = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
 
 export async function listSpeakers(): Promise<SpeakerSummary[]> {
   const r = await fetch(`${BASE}/api/speakers`);
@@ -82,7 +84,7 @@ export class CallSocket {
     },
   ) {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    this.ws = new WebSocket(`${proto}://${location.host}/ws/call/${speakerId}`);
+    this.ws = new WebSocket(`${proto}://${location.host}${BASE}/ws/call/${speakerId}`);
     this.ws.binaryType = "arraybuffer";
     this.ws.onmessage = (e) => {
       if (typeof e.data === "string") {
