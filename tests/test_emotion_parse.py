@@ -29,6 +29,14 @@ def test_bare_and_paren_tags():
     assert _parse_emotion("(sad) 흠") == ("sad", "흠")
 
 
+def test_typo_and_stray_bracket_no_leak():
+    # 실통화 버그(2026-06-20): 모델이 오타 [emtion:happy] 를 내자 누출됨 → 오타도 제거 + happy 추출.
+    assert _parse_emotion("[emtion:happy] 네, 지금 갈게") == ("happy", "네, 지금 갈게")
+    # 본문 중간에 남은 대괄호도 제거(어떤 형태든 TTS 로 안 새게).
+    emo, clean = _parse_emotion("[emo] 안녕 [tag] 하이")
+    assert "[" not in clean and "]" not in clean
+
+
 def test_plain_text_untouched():
     assert _parse_emotion("그냥 평문") == ("neutral", "그냥 평문")
 

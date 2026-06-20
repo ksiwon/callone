@@ -141,17 +141,24 @@ def _parse_emotion(text: str, default: str = "neutral") -> tuple[str, str]:
             return (emo if emo in _EMOTIONS else default), str(obj.get("reply", "")).strip()
         except json.JSONDecodeError:
             pass
-    # 맨 앞 감정 태그 제거 — 단어 무관하게(브래킷이 TTS 로 새어 읽히는 것 방지).
-    #   ① [emotion:xxx]/[emotion=xxx] : 안의 단어가 뭐든 통째 제거 + 그 감정 그대로 전달
-    #      (TTS EMOTION_MAP 이 모르는 감정은 neutral 로 폴백 → 팔레트 확장 시 코드 수정 불필요).
-    #   ② 베어 [happy]/(sad) : 알려진 감정만(괄호 속 일반 텍스트 오제거 방지).
-    m = re.match(r"^\s*\[\s*emotion\s*[:=]\s*([^\]]+?)\s*\]\s*", s, re.IGNORECASE)
+    # 맨 앞 감정 태그 제거 — 오타·변형까지 단어 무관하게(브래킷이 TTS 로 새어 읽히는 것 방지).
+    #   실측: 모델이 [emtion:happy] 처럼 **오타** 내면 'emotion' 정확매칭 정규식이 못 걸러 누출됨.
+    #   → ① 맨 앞 대괄호 [..] 는 (오타 포함) 통째 제거 + 안에서 알려진 감정 추출(있으면).
+    emotion = default
+    m = re.match(r"^\s*\[[^\]]*\]\s*", s)
     if m:
-        return m.group(1).strip().lower(), s[m.end():].strip()
-    m = re.match(r"^\s*[\[(]\s*(" + "|".join(_EMOTIONS) + r")\s*[\])]\s*", s, re.IGNORECASE)
-    if m:
-        return m.group(1).lower(), s[m.end():].strip()
-    return default, s
+        low = m.group(0).lower()
+        emotion = next((e for e in _EMOTIONS if e in low), default)
+        s = s[m.end():]
+    else:
+        #   ② 베어 (happy)/(sad) 괄호 — 알려진 감정만(괄호 속 일반 텍스트 오제거 방지).
+        m = re.match(r"^\s*\(\s*(" + "|".join(_EMOTIONS) + r")\s*\)\s*", s, re.IGNORECASE)
+        if m:
+            emotion = m.group(1).lower()
+            s = s[m.end():]
+    #   ③ 안전망: 본문 어디든 남은 대괄호 그룹 전부 제거(구어체 발화엔 대괄호가 없어야 함).
+    s = re.sub(r"\[[^\]]*\]", "", s).strip()
+    return emotion, s
 
 
 def _tts_stream_emo(tts, text: str, emotion: str):
