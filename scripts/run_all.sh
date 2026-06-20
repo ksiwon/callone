@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 if [ -d /workspace ] && [ -w /workspace ]; then export CALLONE_HOME="${CALLONE_HOME:-/workspace}"
 else export CALLONE_HOME="${CALLONE_HOME:-$HOME}"; fi
 PORT_LLM="${PORT:-8090}"
-AVATAR_BACKEND="${AVATAR_BACKEND:-static}"
+AVATAR_BACKEND="${AVATAR_BACKEND:-ditto}"   # 턴키: 기본 Ditto(영상). 로드 실패 시 _pick_model 이 static 폴백
 LOG="${LOGDIR:-$HOME}"
 
 if [ "${1:-}" = "stop" ]; then

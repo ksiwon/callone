@@ -94,14 +94,21 @@ pip install tensorrt-libs==8.6.1 tensorrt-bindings==8.6.1 "cuda-python<12.9" \
   nvidia-cudnn-cu12==8.9.7.29 --extra-index-url https://pypi.nvidia.com   # TRT8.6 은 cuDNN8 필요(토치는 cuDNN9)
 pip install tensorrt==8.6.1 --no-build-isolation --extra-index-url https://pypi.nvidia.com || true  # 메타 실패해도 모듈 있으면 OK
 
-# env 고정 — DittoModel 이 이걸로 SDK 로드.
-# DATA_ROOT 는 aux_models/ 와 models/ 를 품은 디렉토리(=ditto_pytorch). aux_models(det_10g.onnx)의
-# 부모로 자동 탐지(고정 경로 'ditto_pytorch/models' 는 한 단계 깊어 det_10g 못 찾음 → 실측 버그).
-DATA_ROOT="$(find "$DITTO_REPO/checkpoints" -name det_10g.onnx 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"
-[ -z "$DATA_ROOT" ] && DATA_ROOT="$DITTO_REPO/checkpoints/ditto_pytorch"
-# cfg pkl 은 하위 폴더(ditto_cfg/)에 있음 → 재귀 검색(hubert_cfg_pytorch 우선).
-CFG_PKL="$(find "$DITTO_REPO/checkpoints" -name '*cfg*pytorch*.pkl' 2>/dev/null | grep -i hubert | head -1)"
-[ -z "$CFG_PKL" ] && CFG_PKL="$(find "$DITTO_REPO/checkpoints" -name '*pytorch*.pkl' 2>/dev/null | head -1)"
+# env 고정 — DittoModel 이 이걸로 SDK 로드. **TRT(Ampere) 우선**(RTF<1, 빠름) → 없으면 PyTorch 폴백.
+CK="$DITTO_REPO/checkpoints"
+if [ -d "$CK/ditto_trt_Ampere_Plus" ] && [ -f "$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl" ]; then
+  DATA_ROOT="$CK/ditto_trt_Ampere_Plus"                       # 프리빌트 TRT 엔진(A100 Ampere)
+  CFG_PKL="$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl"      # TRT 온라인(스트리밍) cfg
+  echo "  Ditto 백엔드: TensorRT(Ampere, 온라인) — RTF<1"
+else
+  # PyTorch 폴백: aux_models(det_10g.onnx)의 조부모(=ditto_pytorch) + hubert pytorch cfg.
+  DATA_ROOT="$(find "$CK" -name det_10g.onnx 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"
+  [ -z "$DATA_ROOT" ] && DATA_ROOT="$CK/ditto_pytorch"
+  CFG_PKL="$(find "$CK" -name '*cfg*pytorch*.pkl' 2>/dev/null | grep -i hubert | head -1)"
+  [ -z "$CFG_PKL" ] && CFG_PKL="$(find "$CK" -name '*pytorch*.pkl' 2>/dev/null | head -1)"
+  echo "  Ditto 백엔드: PyTorch(폴백, RTF~1.6) — TRT 엔진 없음"
+fi
+sed -i '/export DITTO_REPO=/d;/export DITTO_DATA_ROOT=/d;/export DITTO_CFG_PKL=/d' ~/.bashrc
 { echo "export DITTO_REPO=$DITTO_REPO"
   echo "export DITTO_DATA_ROOT=$DATA_ROOT"
   echo "export DITTO_CFG_PKL=$CFG_PKL"; } >> ~/.bashrc
