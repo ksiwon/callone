@@ -22,11 +22,10 @@ const Wave = styled.div<{ active: boolean }>`
   }
   @keyframes bounce { 0%,100%{height:8px} 50%{height:40px} }
 `;
-const Avatar = styled.img`
-  /* 비율 유지(정사각 강제 X) + 크게. 긴 변 기준으로 화면에 맞춤. */
+const Avatar = styled.canvas`
+  /* 비율 유지(캔버스 내부 해상도=프레임 원본, CSS 로 축소). 긴 변 기준 화면 맞춤. */
   width: auto; height: auto; max-width: min(48vw, 540px); max-height: 74vh;
-  border-radius: 16px; object-fit: contain;
-  background: #000; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  border-radius: 16px; background: #000; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 `;
 /* 통화화면 본문: 좌(대화/버튼) | 우(얼굴) 2단. 좁은 화면이면 세로로 쌓임. */
 const Stage = styled.div`
@@ -82,7 +81,7 @@ export default function CallScreen() {
   const playheadRef = useRef<number>(0);                     // 다음 청크 재생 시작시각(누적)
   const turnAudioRef = useRef<Float32Array[]>([]);           // 한 턴 오디오 버퍼(A/V 동기 재생용)
   const turnFramesRef = useRef<string[]>([]);                // 한 턴 프레임 버퍼(같은 턴)
-  const imgRef = useRef<HTMLImageElement | null>(null);      // 프레임 직접 갱신(React 리렌더 우회=부드러움)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);  // 프레임 그리기(canvas=디코딩 우회, 부드러움)
   const rafRef = useRef<number | null>(null);                // 프레임 재생 rAF 루프(중단 시 취소)
   const [hasVideo, setHasVideo] = useState(false);           // 영상 프레임 받은 적 있나(img vs 파형)
   const cleanupMicRef = useRef<() => void>(() => {});
@@ -161,12 +160,22 @@ export default function CallScreen() {
 
   // 한 턴의 오디오+프레임을 모았다가 **동시에** 재생(A/V 동기). 프레임은 오디오 길이에 균등 배치
   // → 입모양이 음성에 맞음. 영상이 Ditto 추론(~수 초)으로 늦게 오므로 audio_end 후 한 번에 재생.
-  function playTurn() {
+  async function playTurn() {
     const chunks = turnAudioRef.current; turnAudioRef.current = [];
     const frames = turnFramesRef.current; turnFramesRef.current = [];
     if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
-    if (!chunks.length) {                       // 오디오 없으면 마지막 프레임만 표시
-      if (frames.length && imgRef.current) imgRef.current.src = `data:image/jpeg;base64,${frames[frames.length - 1]}`;
+    if (!chunks.length && !frames.length) return;
+    // 프레임을 **미리 전부 디코딩**(ImageBitmap) → rAF 에선 캔버스에 그리기만(디코딩 지연 0 = 부드러움).
+    let bitmaps: ImageBitmap[] = [];
+    if (frames.length) {
+      try {
+        bitmaps = await Promise.all(frames.map((b64) =>
+          fetch(`data:image/jpeg;base64,${b64}`).then((r) => r.blob()).then((bl) => createImageBitmap(bl))));
+      } catch { bitmaps = []; }
+    }
+    if (!chunks.length) {                        // 오디오 없으면 마지막 프레임만 표시
+      if (bitmaps.length) drawBitmap(bitmaps[bitmaps.length - 1]);
+      bitmaps.forEach((b) => b.close());
       return;
     }
     let ctx = playCtxRef.current;
@@ -182,25 +191,29 @@ export default function CallScreen() {
     node.buffer = buf; node.connect(ctx.destination);
     const startAt = ctx.currentTime + 0.08;
     node.start(startAt);
-    // 진단: 프레임수 대비 실효 fps(낮으면 Ditto 가 프레임을 적게 보낸 것 = 버벅임 원인)
-    console.log(`[A/V] frames=${frames.length} dur=${dur.toFixed(2)}s → ${(frames.length / Math.max(dur, 0.01)).toFixed(1)}fps (목표 25)`);
-    // 프레임: rAF 로 경과시간에 맞는 프레임을 골라 <img>.src 직접 갱신(setState 안 함 → 부드러움).
-    if (frames.length) {
+    console.log(`[A/V] frames=${frames.length} dur=${dur.toFixed(2)}s → ${(frames.length / Math.max(dur, 0.01)).toFixed(1)}fps`);
+    if (bitmaps.length) {
       setHasVideo(true);
-      if (imgRef.current) imgRef.current.src = `data:image/jpeg;base64,${frames[0]}`;
+      drawBitmap(bitmaps[0]);
       const startPerf = performance.now() + (startAt - ctx.currentTime) * 1000;
       let last = -1;
       const tick = () => {
         const el = (performance.now() - startPerf) / 1000;   // 오디오 경과(초)
         if (el >= 0) {
-          const idx = Math.min(frames.length - 1, Math.max(0, Math.floor(el / dur * frames.length)));
-          if (idx !== last && imgRef.current) { imgRef.current.src = `data:image/jpeg;base64,${frames[idx]}`; last = idx; }
+          const idx = Math.min(bitmaps.length - 1, Math.max(0, Math.floor(el / dur * bitmaps.length)));
+          if (idx !== last) { drawBitmap(bitmaps[idx]); last = idx; }
         }
-        if (el < dur) rafRef.current = requestAnimationFrame(tick);
-        else rafRef.current = null;
+        if (el < dur) { rafRef.current = requestAnimationFrame(tick); }
+        else { rafRef.current = null; bitmaps.forEach((b) => b.close()); }   // 끝나면 메모리 해제
       };
       rafRef.current = requestAnimationFrame(tick);
     }
+  }
+
+  function drawBitmap(bmp: ImageBitmap) {
+    const cv = canvasRef.current; if (!cv) return;
+    if (cv.width !== bmp.width || cv.height !== bmp.height) { cv.width = bmp.width; cv.height = bmp.height; }
+    const g = cv.getContext("2d"); if (g) g.drawImage(bmp, 0, 0);
   }
   function toggleMute() { mutedRef.current = !mutedRef.current; setMuted(mutedRef.current); }
 
@@ -279,7 +292,7 @@ export default function CallScreen() {
           </Controls>
         </Panel>
         {hasVideo ? (
-          <Avatar ref={imgRef} alt="avatar" />
+          <Avatar ref={canvasRef} />
         ) : (
           <Wave active={status === "통화 중"}>
             {Array.from({ length: 9 }).map((_, i) => <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />)}

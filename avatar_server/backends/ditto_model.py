@@ -93,6 +93,41 @@ class DittoModel(AvatarModel):
         # 프레임 싱크로 writer 바꿔치기 → 파일 대신 우리 큐로.
         self.sink = _FrameSink()
         self.sdk.writer = self.sink            # [V] attribute 명 self.writer 확인
+        # 콜드스타트 예열: 더미 1초로 1회 추론 → CUDA graph 캡처/모델 예열 → 첫 턴이 콜드로 프레임 0
+        # (영상 안 나옴) 되는 것 방지. 세션 시작(연결 중)에 처리되니 통화 지연엔 안 보임.
+        try:
+            self._warmup()
+        except Exception as e:  # noqa: BLE001
+            print(f"[ditto] 예열 생략({e})")
+
+    def _feed(self, a16: np.ndarray) -> int:
+        """16k 오디오를 온라인 청크 루프로 SDK 에 먹인다. 반환=예상 프레임수(num_f)."""
+        import math
+        chunksize = (3, 5, 2)
+        num_f = max(1, math.ceil(len(a16) / 16000 * 25))
+        split_len = int(sum(chunksize) * 0.04 * 16000) + 80
+        with self._lock:
+            self.sdk.setup_Nd(N_d=num_f)                       # 발화당 프레임수 재무장
+            a = np.pad(a16, (chunksize[0] * 640, 0))           # 앞 zero 패딩(repo 정합)
+            for i in range(0, len(a), chunksize[1] * 640):
+                chunk = a[i:i + split_len]
+                if len(chunk) < split_len:
+                    chunk = np.pad(chunk, (0, split_len - len(chunk)))
+                self.sdk.run_chunk(chunk, chunksize)
+        return num_f
+
+    def _warmup(self) -> None:
+        if self.sink is None:
+            return
+        num_f = self._feed(np.zeros(16000, dtype=np.float32))   # 1초 무음
+        got = 0
+        while got < num_f:                                      # 콜드 캡처 끝날 때까지 길게, 프레임은 버림
+            try:
+                if self.sink.q.get(timeout=30.0) is None:
+                    break
+            except queue.Empty:
+                break
+            got += 1
 
     def frames(self, audio: np.ndarray, sr: int):
         """**한 발화 전체 오디오**(임의 sr) → 16k → setup_Nd(프레임수) → 온라인 청크 루프 run_chunk
@@ -105,8 +140,6 @@ class DittoModel(AvatarModel):
         [V] GPU 검증: ① close() 없이 발화마다 setup_Nd 재무장 가능한지(안 되면 발화당 재 setup)
                       ② 마지막 프레임 flush 타이밍(close 가 flush 하는데 멀티턴이라 close 안 함).
         """
-        import math
-
         if self.sink is None:
             return
         a = np.asarray(audio, dtype=np.float32).flatten()
@@ -121,22 +154,12 @@ class DittoModel(AvatarModel):
                               np.arange(len(a)), a).astype("float32")
         if len(a) == 0:
             return
-        chunksize = (3, 5, 2)
-        num_f = max(1, math.ceil(len(a) / 16000 * 25))
-        split_len = int(sum(chunksize) * 0.04 * 16000) + 80
-        with self._lock:
-            self.sdk.setup_Nd(N_d=num_f)                       # 발화당 프레임수 재무장
-            a = np.pad(a, (chunksize[0] * 640, 0))             # 앞 zero 패딩(repo 정합)
-            for i in range(0, len(a), chunksize[1] * 640):
-                chunk = a[i:i + split_len]
-                if len(chunk) < split_len:
-                    chunk = np.pad(chunk, (0, split_len - len(chunk)))
-                self.sdk.run_chunk(chunk, chunksize)
-        # 워커가 비동기로 num_f 프레임 생성 → 모일 때까지 drain(프레임당 여유 타임아웃).
+        num_f = self._feed(a)                                  # setup_Nd + 청크 루프
+        # 워커가 비동기로 num_f 프레임 생성 → 모일 때까지 drain. 첫 프레임은 여유(콜드 잔여), 이후 짧게.
         got = 0
         while got < num_f:
             try:
-                fr = self.sink.q.get(timeout=2.0)
+                fr = self.sink.q.get(timeout=(15.0 if got == 0 else 2.0))
             except queue.Empty:
                 break
             if fr is None:
