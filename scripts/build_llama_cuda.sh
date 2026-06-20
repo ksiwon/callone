@@ -33,10 +33,21 @@ if ! command -v cmake >/dev/null 2>&1; then
     || echo "⚠️ cmake 자동설치 실패 — 'conda install -y cmake' 또는 패키지매니저로 직접 설치 후 재실행"
 fi
 
-# CUDA 아키텍처를 현재 GPU 것만(native) 빌드 → 안 쓸 옛 아키 중복 컴파일 제거로 빌드 대폭 단축.
-#   (default 는 여러 아키 리스트라 nvcc 가 커널마다 N배 컴파일 = 40~60분). native = 박힌 GPU 한 종류만.
-#   특정 아키 강제: CUDA_ARCH=80 bash ...(A100=80, 3090/4090=86/89, H100=90).
-CUDA_ARCH="${CUDA_ARCH:-native}"
+# CUDA 아키텍처를 현재 GPU 것만 빌드 → 안 쓸 옛 아키 중복 컴파일 제거로 빌드 대폭 단축.
+#   (default 는 여러 아키 리스트라 nvcc 가 커널마다 N배 컴파일 = 40~60분).
+#   ⚠️ "native" 는 CMake>=3.24 만 지원 → 구버전(예 3.22)에선 빈 값→nvcc fatal. 그래서 nvidia-smi 로
+#      **compute capability 숫자를 직접 감지**(A100 8.0→80, 4090 8.9→89, H100 9.0→90)해 넘긴다.
+#   강제: CUDA_ARCH=80 bash ...   (자동감지 실패 시 안전 리스트로 폴백)
+CUDA_ARCH="${CUDA_ARCH:-auto}"
+if [ "$CUDA_ARCH" = "auto" ] || [ "$CUDA_ARCH" = "native" ]; then
+  cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '. ')"
+  if printf '%s' "$cap" | grep -qE '^[0-9]+$'; then
+    CUDA_ARCH="$cap"
+  else
+    echo "⚠️ GPU arch 자동감지 실패(nvidia-smi) → 안전 리스트(80;86;89;90)로 빌드"
+    CUDA_ARCH="80;86;89;90"
+  fi
+fi
 echo "=== CUDA 아키텍처: $CUDA_ARCH (jobs=$(nproc)) ==="
 cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=OFF -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH"
 cmake --build build --config Release -j"$(nproc)" --target llama-server
