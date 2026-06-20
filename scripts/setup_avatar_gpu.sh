@@ -78,7 +78,10 @@ PY
 ) || echo "[warn] import 스캔 생략(계속)"
 
 # env 고정 — DittoModel 이 이걸로 SDK 로드.
-DATA_ROOT="$DITTO_REPO/checkpoints/ditto_pytorch/models"
+# DATA_ROOT 는 aux_models/ 와 models/ 를 품은 디렉토리(=ditto_pytorch). aux_models(det_10g.onnx)의
+# 부모로 자동 탐지(고정 경로 'ditto_pytorch/models' 는 한 단계 깊어 det_10g 못 찾음 → 실측 버그).
+DATA_ROOT="$(find "$DITTO_REPO/checkpoints" -name det_10g.onnx 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"
+[ -z "$DATA_ROOT" ] && DATA_ROOT="$DITTO_REPO/checkpoints/ditto_pytorch"
 # cfg pkl 은 하위 폴더(ditto_cfg/)에 있음 → 재귀 검색(hubert_cfg_pytorch 우선).
 CFG_PKL="$(find "$DITTO_REPO/checkpoints" -name '*cfg*pytorch*.pkl' 2>/dev/null | grep -i hubert | head -1)"
 [ -z "$CFG_PKL" ] && CFG_PKL="$(find "$DITTO_REPO/checkpoints" -name '*pytorch*.pkl' 2>/dev/null | head -1)"
