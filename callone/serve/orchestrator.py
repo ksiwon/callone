@@ -194,6 +194,8 @@ class Orchestrator:
         self.sentence_pause_ms = int(tcfg.get("sentence_pause_ms", 180))
         self.history: list[dict] = []
         self._interrupt = threading.Event()
+        # 토킹헤드(선택, 기본 off): 사진→움직이는 얼굴. 없거나 실패해도 음성은 그대로(부가 레이어).
+        self.avatar = self._init_avatar(cfg)
         # 워밍업: 부팅 시 ASR/LLM/TTS 더미 1회 → CUDA graph 빌드 + ref 인코딩 + 슬롯 예열.
         # 첫 통화 턴의 콜드스타트(수 초) 제거. 목소리/출력엔 영향 0(폐기됨). 초기 셋업만 길어짐.
         if bool(cfg.get("warmup", True)):
@@ -236,9 +238,39 @@ class Orchestrator:
                  t["asr_ms"], t["llm_ms"], t["tts_ms"], t["total_ms"])
         return t
 
+    def _default_portrait(self, speaker: str) -> str:
+        """화자 폴더에서 증명사진 자동탐색(portrait.jpg/jpeg/png)."""
+        for ext in ("jpg", "jpeg", "png"):
+            p = Path("data/speakers") / speaker / f"portrait.{ext}"
+            if p.exists():
+                return str(p)
+        return ""
+
+    def _init_avatar(self, cfg: dict):
+        """토킹헤드 백엔드 준비(선택). enabled=false 거나 사진/서버 없으면 None(음성전용)."""
+        acfg = cfg.get("avatar", {}) or {}
+        if not bool(acfg.get("enabled", False)):
+            return None
+        try:
+            from .avatar import _pick_avatar
+
+            av = _pick_avatar(cfg)
+            img = acfg.get("image") or self._default_portrait(self.speaker)
+            av.start_call(img)
+            log.info("토킹헤드 활성: %s (사진 %s)", type(av).__name__, img)
+            return av
+        except Exception as e:  # noqa: BLE001
+            log.warning("토킹헤드 비활성(%s) — 음성전용", e)
+            return None
+
     def interrupt(self):
         """barge-in: 진행 중인 응답 중단 (app 이 마이크에서 사용자 발화 감지 시 호출)."""
         self._interrupt.set()
+        if self.avatar is not None:
+            try:
+                self.avatar.interrupt()
+            except Exception:  # noqa: BLE001
+                pass
 
     def set_context(self, persona: str | None = None, situation: str | None = None):
         """통화 페르소나/상황 주입 — 매 통화 시작 시 호출.
@@ -364,6 +396,14 @@ class Orchestrator:
                     t_tts_first = time.time()
                     yield ("latency", (t_tts_first - t0) * 1000); first = True
                 yield ("audio", chunk)
+                # 토킹헤드(선택): 같은 오디오로 얼굴 프레임 생성 → ("frame", jpeg). 없으면 스킵.
+                if self.avatar is not None:
+                    try:
+                        for fr in self.avatar.frames_for(chunk, sr_out):
+                            yield ("frame", fr)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("avatar 프레임 생성 오류(%s) — 영상 생략", e)
+                        self.avatar = None
             else:
                 continue
             break

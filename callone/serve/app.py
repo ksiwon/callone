@@ -141,6 +141,11 @@ def create_app():
                         break
                     if kind == "audio":
                         await ws.send_bytes(val.astype(np.float32).tobytes())
+                    elif kind == "frame":
+                        # 토킹헤드 JPEG 프레임 → base64 JSON(기존 오디오 바이너리와 구분, 비파괴).
+                        import base64
+                        await ws.send_text(json.dumps(
+                            {"type": "frame", "jpeg_b64": base64.b64encode(val).decode()}))
                     elif kind == "text":
                         await ws.send_text(json.dumps({"type": "reply", "text": val},
                                                       ensure_ascii=False))

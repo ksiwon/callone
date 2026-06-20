@@ -63,6 +63,16 @@ tts:
   ref_text: ""                 # 비우면 ref_text.txt/자동전사로 해결
 orchestration: pipecat         # Pipecat + LiveKit(WebRTC)
 latency_budget_ms: 1200        # 첫 음성 < 1.2s, 목표 0.8s
+# 토킹헤드(사진→움직이는 얼굴, 영상통화) — docs/avatar_talking_head_design.md.
+# 증명사진 1장 + TTS 음성 → 입·표정·고개. 음성의 부가 레이어(모델 없으면 정지사진 폴백).
+avatar:
+  enabled: false               # 기본 off(음성전용). 켜면 _pick_avatar 폴백체인 동작
+  backend: auto                # auto | ditto | static  (auto=avatar-server 있으면 Ditto, 없으면 static)
+  base_url: "http://127.0.0.1:8091"   # avatar-server(별 venv·별 프로세스, GPU)
+  image: ""                    # 예: data/speakers/A/portrait.jpg (png/jpg/jpeg). 비면 화자 폴더 자동탐색
+  fps: 25
+  resolution: 256              # 256 | 512 (VRAM/지연 trade)
+  frame_format: jpeg           # jpeg (1차) | h264 (WebRTC 스케일 시)
 rag:
   enabled: true
   vector_db: faiss             # faiss | chroma | qdrant | sqlite-vss
