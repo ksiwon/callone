@@ -42,7 +42,9 @@ pip install librosa opencv-python-headless imageio imageio-ffmpeg scikit-image t
 
 # env 고정 — DittoModel 이 이걸로 SDK 로드.
 DATA_ROOT="$DITTO_REPO/checkpoints/ditto_pytorch/models"
-CFG_PKL="$(ls "$DITTO_REPO"/checkpoints/*pytorch*.pkl 2>/dev/null | head -1 || true)"
+# cfg pkl 은 하위 폴더(ditto_cfg/)에 있음 → 재귀 검색(hubert_cfg_pytorch 우선).
+CFG_PKL="$(find "$DITTO_REPO/checkpoints" -name '*cfg*pytorch*.pkl' 2>/dev/null | grep -i hubert | head -1)"
+[ -z "$CFG_PKL" ] && CFG_PKL="$(find "$DITTO_REPO/checkpoints" -name '*pytorch*.pkl' 2>/dev/null | head -1)"
 { echo "export DITTO_REPO=$DITTO_REPO"
   echo "export DITTO_DATA_ROOT=$DATA_ROOT"
   echo "export DITTO_CFG_PKL=$CFG_PKL"; } >> ~/.bashrc
