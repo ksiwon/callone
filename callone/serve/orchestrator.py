@@ -452,8 +452,10 @@ class Orchestrator:
         t0 = time.time()
         user_text = self.asr.transcribe(audio, sr)
         t_asr = time.time()
+        log.info("ASR 완료(%d자, %.0fms)", len(user_text), (t_asr - t0) * 1000)   # 진단(본문 X)
         yield ("user", user_text)
         if not user_text.strip():
+            log.info("빈 전사 — 턴 종료(말 못 알아들음/무음)")
             yield ("end", "")
             return
         # 1) LLM 응답 전체 수집 — full 합성으로 studio 와 **같은 음색**(우선순위 1: 목소리 유사도).
@@ -471,6 +473,7 @@ class Orchestrator:
                 parts.append(clean)
         t_llm_done = time.time()
         reply = " ".join(parts)
+        log.info("LLM 완료(%d자, %.0fms) → TTS 합성 시작", len(reply), (t_llm_done - t_asr) * 1000)  # 진단
         if reply and not self._interrupt.is_set():
             yield ("emotion", emotion)
             yield ("text", reply)
