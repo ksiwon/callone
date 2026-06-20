@@ -89,7 +89,9 @@ bash scripts/run_all.sh          # 다 떠 있으면 health만, 죽은 것만 �
 - **첫 턴 영상은 콜드(~30s, TRT 첫 추론)** — 이후 턴은 RTF<1로 빠름. 정상.
 - **A/V 동기**: 음성이 영상 생성을 기다렸다 같이 재생(입싱크 우선). 음성전용(사진 미업로드)이면 지연 없음.
 - **프라이버시**: 음성·사진·대화는 프론트(브라우저) 소유. 서버는 인메모리(/dev/shm)만, 통화 끝나면 폐기. 디스크/로그에 본문 0.
-- **4090 이전 시**: TRT 엔진은 GPU 아키텍처별 → 4090(Ada)에선 `ditto_trt_Ampere_Plus`가 안 맞을 수 있음. 그땐 onnx에서 재빌드하거나 PyTorch 폴백(`DITTO_DATA_ROOT`/`CFG_PKL`을 ditto_pytorch로). EXAONE/CosyVoice는 그대로 동작.
-- **로그**: `~/serve.log` `~/avatar.log` `~/cosyvoice.log` `~/llama.log`
+- **A100 vs 4090(자동 처리)**: 프리빌트 TRT 엔진(`ditto_trt_Ampere_Plus`)은 **Ampere(A100, cc 8.0/8.6) 전용**.
+  `setup_avatar_gpu.sh` 가 GPU compute capability 를 감지해 **Ampere면 TRT(RTF<1), 그 외(4090 Ada cc 8.9 등)는
+  PyTorch 자동 폴백**(어디서나 동작, RTF~1.6). 4090 에서 TRT 속도를 원하면 `ditto_onnx` 에서 엔진 재빌드.
+  LLM(EXAONE)·TTS(CosyVoice3)·ASR 은 두 GPU 동일.
+- **로그**: `~/serve.log` `~/avatar.log` `~/cosyvoice.log` `~/llama.log` (본문 없음 — 길이·지연만)
 - **단계별 시간**: `grep -E "ASR 완료|LLM 완료|아바타" ~/serve.log`
-</content>

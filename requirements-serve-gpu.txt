@@ -37,9 +37,7 @@ faster-whisper>=1.0
 #      onnxruntime 를 끌어온다. transformers 를 여기서 따로 핀하지 마라(충돌 유발).
 faster-qwen3-tts>=0.2.6
 
-# --- studio 통합 앱(:50000)도 쓸 때만 ---
-gradio>=4.0
-pydub>=0.25
-noisereduce>=3.0
+# --- 토킹헤드(avatar-server) WS 동기 클라이언트 (callone/serve/avatar.py) ---
+websocket-client>=1.7
 
 # numpy<2.4 는 4) 단계에서 마지막에 별도 설치(여기 두면 faster-qwen3-tts 가 다시 올릴 수 있음).

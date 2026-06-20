@@ -83,13 +83,21 @@ class DittoModel(AvatarModel):
 
     def start(self, image_bytes: bytes, fps: int, resolution: int) -> None:
         self.resolution = int(resolution)
-        # 사진을 임시파일로(Ditto setup 은 source_path 받음). 얼굴 검출·정렬은 Ditto 내부.
-        f = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        f.write(image_bytes)
-        f.close()
-        dummy_out = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
-        # [V] online_mode=True 로 스트리밍 셋업. setup_Nd 가 필요하면 여기서 호출(총 프레임 수 미정→online 처리).
-        self.sdk.setup(f.name, dummy_out, online_mode=True)
+        # 프라이버시: 사진을 **tmpfs(/dev/shm, RAM)** 에 잠깐 쓰고 setup 직후 즉시 삭제(디스크 영속 0).
+        #   Ditto setup 은 source_path 를 받아 메모리로 로드 → 그 뒤 파일 불필요.
+        base = "/dev/shm" if os.path.isdir("/dev/shm") and os.access("/dev/shm", os.W_OK) else tempfile.gettempdir()
+        fd, src_path = tempfile.mkstemp(suffix=".png", prefix="ditto_src_", dir=base)
+        with os.fdopen(fd, "wb") as f:
+            f.write(image_bytes)
+        dummy_out = os.path.join(base, f"ditto_out_{os.getpid()}.mp4")  # 실제 안 쓰임(writer 가로채기로 파일출력 우회)
+        try:
+            self.sdk.setup(src_path, dummy_out, online_mode=True)
+        finally:
+            for p in (src_path, dummy_out):    # 사진·더미 출력 즉시 삭제
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
         # 프레임 싱크로 writer 바꿔치기 → 파일 대신 우리 큐로.
         self.sink = _FrameSink()
         self.sdk.writer = self.sink            # [V] attribute 명 self.writer 확인

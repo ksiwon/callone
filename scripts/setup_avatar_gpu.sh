@@ -94,19 +94,25 @@ pip install tensorrt-libs==8.6.1 tensorrt-bindings==8.6.1 "cuda-python<12.9" \
   nvidia-cudnn-cu12==8.9.7.29 --extra-index-url https://pypi.nvidia.com   # TRT8.6 은 cuDNN8 필요(토치는 cuDNN9)
 pip install tensorrt==8.6.1 --no-build-isolation --extra-index-url https://pypi.nvidia.com || true  # 메타 실패해도 모듈 있으면 OK
 
-# env 고정 — DittoModel 이 이걸로 SDK 로드. **TRT(Ampere) 우선**(RTF<1, 빠름) → 없으면 PyTorch 폴백.
+# env 고정 — DittoModel 이 이걸로 SDK 로드.
+# ⚠️ 프리빌트 TRT 엔진(ditto_trt_Ampere_Plus)은 **Ampere(A100, sm_80/86) 전용** — Ada(RTX4090, sm_89)
+#    등 다른 아키텍처에선 deserialize 실패. 그래서 **GPU compute capability 가 Ampere 일 때만 TRT**,
+#    아니면 PyTorch 폴백(어디서나 동작, RTF~1.6). 4090 서 TRT 원하면 ditto_onnx 에서 재빌드 필요.
 CK="$DITTO_REPO/checkpoints"
-if [ -d "$CK/ditto_trt_Ampere_Plus" ] && [ -f "$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl" ]; then
-  DATA_ROOT="$CK/ditto_trt_Ampere_Plus"                       # 프리빌트 TRT 엔진(A100 Ampere)
+CC="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')"
+USE_TRT=0
+case "$CC" in 8.0|8.6) USE_TRT=1 ;; esac   # Ampere(A100/A6000 등). Ada(8.9)·Hopper(9.0) 는 폴백
+if [ "$USE_TRT" = 1 ] && [ -d "$CK/ditto_trt_Ampere_Plus" ] && [ -f "$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl" ]; then
+  DATA_ROOT="$CK/ditto_trt_Ampere_Plus"                       # 프리빌트 TRT 엔진(Ampere)
   CFG_PKL="$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl"      # TRT 온라인(스트리밍) cfg
-  echo "  Ditto 백엔드: TensorRT(Ampere, 온라인) — RTF<1"
+  echo "  Ditto 백엔드: TensorRT(Ampere cc=$CC, 온라인) — RTF<1"
 else
-  # PyTorch 폴백: aux_models(det_10g.onnx)의 조부모(=ditto_pytorch) + hubert pytorch cfg.
+  # PyTorch: aux_models(det_10g.onnx)의 조부모(=ditto_pytorch) + hubert pytorch cfg.
   DATA_ROOT="$(find "$CK" -name det_10g.onnx 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"
   [ -z "$DATA_ROOT" ] && DATA_ROOT="$CK/ditto_pytorch"
   CFG_PKL="$(find "$CK" -name '*cfg*pytorch*.pkl' 2>/dev/null | grep -i hubert | head -1)"
   [ -z "$CFG_PKL" ] && CFG_PKL="$(find "$CK" -name '*pytorch*.pkl' 2>/dev/null | head -1)"
-  echo "  Ditto 백엔드: PyTorch(폴백, RTF~1.6) — TRT 엔진 없음"
+  echo "  Ditto 백엔드: PyTorch(cc=${CC:-?}, RTF~1.6) — 프리빌트 TRT 는 Ampere 전용이라 폴백"
 fi
 sed -i '/export DITTO_REPO=/d;/export DITTO_DATA_ROOT=/d;/export DITTO_CFG_PKL=/d' ~/.bashrc
 { echo "export DITTO_REPO=$DITTO_REPO"

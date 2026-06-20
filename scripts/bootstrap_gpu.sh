@@ -167,9 +167,10 @@ cat <<EOF
 
 == 부트스트랩 완료 ==
   llama-server: $LBIN   GGUF: ${GGUF:-(없음)}
-  다음:
-    callone-bench --speaker $SPK --turns 5 --text "여보세요, 밥은 먹었어?"   # 지연 실측
-    GRADIO_SHARE=1 python -m studio                                          # 브라우저 통화
+  다음(전체 기동·UI 는 docs/FRESH_SETUP.md):
+    bash scripts/setup_cosyvoice_gpu.sh   # 음색(CosyVoice3)   bash scripts/setup_avatar_gpu.sh   # 영상(Ditto)
+    source ~/.bashrc && bash scripts/run_all.sh    # 4개 서비스 한 방
+    cd ui && npm run dev                            # 통화 UI(:5173)  → 브라우저 localhost:5173/call/me
 
   ※ 새로 컴파일됐다면(프리빌트 폴백 등) — 이 바이너리를 올려두면 다음 인스턴스부턴 컴파일 0:
     tar czf /tmp/llama-bin.tgz -C "$(dirname "$LBIN")" .

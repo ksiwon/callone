@@ -34,7 +34,7 @@ pip install --index-url "$CUDA_INDEX" torch torchaudio
 echo "=== [3] callone 코어(폴백 배관, heavy 아님) ==="
 pip install -e .
 
-echo "=== [4] 서빙 의존성(faster-whisper + faster-qwen3-tts + studio) ==="
+echo "=== [4] 서빙 의존성(faster-whisper + faster-qwen3-tts + websocket-client) ==="
 pip install -r requirements-serve-gpu.txt
 
 echo "=== [5] numpy 핀(librosa/numba — 반드시 마지막) ==="
@@ -44,7 +44,7 @@ echo "=== [6] 충돌 점검 ==="
 pip check || echo "  ⚠️ pip check 경고 — 위 메시지 확인(transformers 가 4.57.3 인지 봐라)"
 python - <<'PY'
 import importlib.metadata as m
-for p in ("torch","transformers","faster-qwen3-tts","qwen-tts","faster-whisper","numpy","gradio"):
+for p in ("torch","transformers","faster-qwen3-tts","qwen-tts","faster-whisper","numpy","websocket-client"):
     try:
         print(f"  {p:18s} {m.version(p)}")
     except Exception:
