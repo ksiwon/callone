@@ -183,12 +183,16 @@ _EMOJI_RE = re.compile(
     "]+", flags=re.UNICODE)
 
 
+_HANZI_RE = re.compile(r"[㐀-䶿一-鿿豈-﫿]")  # CJK 한자(중국어/한자 누출)
+
+
 def _strip_unspoken(text: str) -> str:
-    """입으로 못 읽는 것 제거: 괄호() 속 해설·행동·자기설명 + 이모지/이모티콘.
-    LLM 이 '(웃으며)', '(이모지는 상상이에요)', 😍 등을 흘리면 TTS 가 어색해짐 → 발화 직전 정제."""
+    """입으로 못 읽는 것 제거: 괄호() 속 해설·행동·자기설명 + 이모지/이모티콘 + 한자.
+    LLM(중국계 베이스)이 '(웃으며)', 😍, '馋' 같은 한자를 흘리면 TTS 가 어색해짐 → 발화 직전 정제."""
     text = re.sub(r"[(（][^()（）]*[)）]", "", text)   # 괄호 묶음(해설/행동/메타) 제거
     text = _EMOJI_RE.sub("", text)                    # 이모지 제거
     text = re.sub(r"[:;][-^]?[)D(P]", "", text)        # 기본 이모티콘 :) :D 등
+    text = _HANZI_RE.sub("", text)                     # 한자 제거(한국어 구어엔 안 나옴 — TTS 오발음 방지)
     return re.sub(r"\s{2,}", " ", text).strip()
 
 

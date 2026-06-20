@@ -212,7 +212,7 @@ export default function CallScreen() {
           <label>증명사진 (얼굴, jpg/png) — 선택</label>
           <input type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
           <label>이 사람은 누구? (페르소나) — 선택</label>
-          <input type="text" value={persona} onChange={(e) => setPersona(e.target.value)} placeholder="예: 내 친한 여동생, 반말로 짧게" />
+          <input type="text" value={persona} onChange={(e) => setPersona(e.target.value)} placeholder="예: 어릴 적 친구 승호" />
           <label>지금 상황 — 선택</label>
           <input type="text" value={situation} onChange={(e) => setSituation(e.target.value)} placeholder="예: 오랜만에 전화" />
           <label>이전 대화 불러오기 (이어하기) — 선택  {turns > 0 ? `· 저장된 ${turns}턴 있음` : ""}</label>
