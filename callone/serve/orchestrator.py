@@ -494,8 +494,9 @@ class Orchestrator:
             yield ("emotion", emotion)
             yield ("text", reply)
 
-        # 2) 합성: full=응답 통째 1회(음색 일관=studio 동일) / sentence=문장별+무음. 청크마다 audio(+frame),
-        #    barge-in 은 청크마다 존중. 토킹헤드는 같은 오디오로 프레임 생성(오디오가 master clock).
+        # 2) 합성: full=응답 통째 1회(음색 일관=studio 동일) / sentence=문장별+무음.
+        #    오디오 청크는 나오는 대로 스트리밍(첫음성 빠르게). 토킹헤드(Ditto)는 발화 전체 길이로
+        #    setup_Nd 를 해야 하므로 **세그먼트 오디오를 모은 뒤 1회** frames_for 호출(청크별 호출 불가).
         first = False
         t_tts_first = 0.0
         sr_out = getattr(self.tts, "sr", 24000)
@@ -505,6 +506,7 @@ class Orchestrator:
                 yield ("interrupted", None); break
             if i > 0 and self.sentence_pause_ms > 0:             # 세그먼트 사이 텀(무음)
                 yield ("audio", _silence(sr_out, self.sentence_pause_ms))
+            seg_chunks: list[np.ndarray] = []
             for chunk in _tts_stream_emo(self.tts, seg, emotion):
                 if self._interrupt.is_set():
                     yield ("interrupted", None); break
@@ -512,15 +514,19 @@ class Orchestrator:
                     t_tts_first = time.time()
                     yield ("latency", (t_tts_first - t0) * 1000); first = True
                 yield ("audio", chunk)
-                # 토킹헤드(선택): 같은 오디오로 얼굴 프레임 → ("frame", jpeg). 없으면 스킵.
                 if self.avatar is not None:
+                    seg_chunks.append(chunk)
+            else:
+                # 토킹헤드(선택): 세그먼트 전체 오디오 → 얼굴 프레임들. (오디오가 master clock — 프론트가
+                # 25fps 로 동기 재생). 실패하면 영상만 생략하고 음성은 계속.
+                if self.avatar is not None and seg_chunks and not self._interrupt.is_set():
                     try:
-                        for fr in self.avatar.frames_for(chunk, sr_out):
+                        full_seg = np.concatenate(seg_chunks)
+                        for fr in self.avatar.frames_for(full_seg, sr_out):
                             yield ("frame", fr)
                     except Exception as e:  # noqa: BLE001
                         log.warning("avatar 프레임 생성 오류(%s) — 영상 생략", e)
                         self.avatar = None
-            else:
                 continue
             break
 

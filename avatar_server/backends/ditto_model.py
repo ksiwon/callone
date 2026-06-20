@@ -91,29 +91,53 @@ class DittoModel(AvatarModel):
         self.sdk.writer = self.sink            # [V] attribute 명 self.writer 확인
 
     def frames(self, audio: np.ndarray, sr: int):
-        """오디오 청크(임의 sr) → 16k 리샘플 → run_chunk → 워커가 생성한 프레임 drain → JPEG yield."""
+        """**한 발화 전체 오디오**(임의 sr) → 16k → setup_Nd(프레임수) → 온라인 청크 루프 run_chunk
+        → 워커가 비동기 생성한 프레임을 num_f 개 모일 때까지 drain → JPEG yield.
+
+        repo inference.py 온라인 흐름 정합(2026-06-21 검증):
+          num_f = ceil(len/16000*25); setup_Nd(N_d=num_f);
+          앞 zero패딩 chunksize[0]*640; split_len=sum(chunksize)*0.04*16000+80;
+          for i in range(0,len,chunksize[1]*640): run_chunk(audio[i:i+split_len], chunksize)
+        [V] GPU 검증: ① close() 없이 발화마다 setup_Nd 재무장 가능한지(안 되면 발화당 재 setup)
+                      ② 마지막 프레임 flush 타이밍(close 가 flush 하는데 멀티턴이라 close 안 함).
+        """
+        import math
+
         if self.sink is None:
             return
-        a = np.asarray(audio, dtype=np.float32)
-        if sr != 16000:                         # [V] Ditto 는 16kHz(librosa load sr=16000)
+        a = np.asarray(audio, dtype=np.float32).flatten()
+        if sr != 16000:                         # Ditto 는 16kHz
             try:
                 import librosa
 
                 a = librosa.resample(a, orig_sr=sr, target_sr=16000)
-            except Exception:                   # noqa: BLE001  librosa 없으면 선형 리샘플(품질 무관)
+            except Exception:                   # noqa: BLE001  librosa 없으면 선형 리샘플
                 n = int(len(a) * 16000 / sr)
                 a = np.interp(np.linspace(0, len(a), n, endpoint=False),
                               np.arange(len(a)), a).astype("float32")
+        if len(a) == 0:
+            return
+        chunksize = (3, 5, 2)
+        num_f = max(1, math.ceil(len(a) / 16000 * 25))
+        split_len = int(sum(chunksize) * 0.04 * 16000) + 80
         with self._lock:
-            self.sdk.run_chunk(a, chunksize=(3, 5, 2))   # [V] 입력 청크 크기 정합은 repo 확인
-        # 워커 스레드가 비동기로 프레임 생성 → 현재까지 나온 것 drain(타임아웃으로 idle 감지).
-        while True:
+            self.sdk.setup_Nd(N_d=num_f)                       # 발화당 프레임수 재무장
+            a = np.pad(a, (chunksize[0] * 640, 0))             # 앞 zero 패딩(repo 정합)
+            for i in range(0, len(a), chunksize[1] * 640):
+                chunk = a[i:i + split_len]
+                if len(chunk) < split_len:
+                    chunk = np.pad(chunk, (0, split_len - len(chunk)))
+                self.sdk.run_chunk(chunk, chunksize)
+        # 워커가 비동기로 num_f 프레임 생성 → 모일 때까지 drain(프레임당 여유 타임아웃).
+        got = 0
+        while got < num_f:
             try:
-                fr = self.sink.q.get(timeout=0.2)
+                fr = self.sink.q.get(timeout=2.0)
             except queue.Empty:
                 break
             if fr is None:
                 break
+            got += 1
             yield _jpeg(fr, self.resolution)
 
     def stop(self) -> None:

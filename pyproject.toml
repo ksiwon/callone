@@ -27,6 +27,7 @@ dependencies = [
   "fastapi>=0.110",
   "uvicorn>=0.27",
   "websockets>=12.0",
+  "websocket-client>=1.7",   # avatar.py 가 avatar-server WS 에 붙는 동기 클라(import websocket). 영상통화용
 ]
 
 [project.optional-dependencies]
