@@ -53,11 +53,13 @@ echo "==> [4/6] 의존성(빌드지옥 제외) + fastapi 서버"
 grep -vE 'tensorrt|onnxruntime-gpu|deepspeed|openai-whisper' requirements.txt > requirements_clean.txt
 pip install -r requirements_clean.txt
 pip install onnxruntime
-pip install --force-reinstall torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 pip install soundfile huggingface_hub faster-whisper noisereduce pydub
 # CosyVoice frontend.py 가 'import whisper'(openai-whisper) 필요 — requirements_clean 에서 제외됐으므로 별도 설치.
+# ⚠️ openai-whisper 가 torch 를 끌어내리므로(2.6→2.3) **반드시 torch 고정 전에** 깐다.
 pip install openai-whisper==20231117 --no-build-isolation || pip install openai-whisper --no-build-isolation || pip install openai-whisper
 pip install fastapi uvicorn pydantic           # callone cosyvoice_server 용
+# torch 2.6.0 cu124 고정 — 맨 마지막(위 whisper 가 깎은 torch 복구). torchaudio 2.6.0 정합 필수.
+pip install --force-reinstall --no-deps torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 
 echo "==> [5/6] 모델 다운로드(Fun-CosyVoice3-0.5B-2512, ~9.75GB)"
 if [ ! -f "$MODEL_DIR/cosyvoice.yaml" ] && [ ! -f "$MODEL_DIR/config.yaml" ]; then
