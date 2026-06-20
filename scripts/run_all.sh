@@ -43,7 +43,11 @@ fi
 pkill -f "avatar_server" 2>/dev/null; sleep 1
 if [ -d .venv-avatar ]; then
   echo "[2/3] avatar-server($AVATAR_BACKEND) :8091..."
+  # TRT 백엔드: cuDNN8(TRT8.6)·tensorrt_libs·cuBLAS 를 LD_LIBRARY_PATH 에(libcudnn.so.8 등 못 찾는 것 방지).
+  AV_SP="$(.venv-avatar/bin/python -c 'import site;print(site.getsitepackages()[0])' 2>/dev/null)"
+  AV_LD="$AV_SP/nvidia/cudnn/lib:$AV_SP/tensorrt_libs:$AV_SP/nvidia/cublas/lib:$AV_SP/nvidia/cuda_runtime/lib"
   ( source .venv-avatar/bin/activate && AVATAR_BACKEND="$AVATAR_BACKEND" \
+      LD_LIBRARY_PATH="$AV_LD:${LD_LIBRARY_PATH:-}" \
       nohup python -m avatar_server --port 8091 > "$LOG/avatar.log" 2>&1 & )
 else
   echo "[2/3] .venv-avatar 없음 → 영상 생략(scripts/setup_avatar_gpu.sh 먼저). 음성은 정상."

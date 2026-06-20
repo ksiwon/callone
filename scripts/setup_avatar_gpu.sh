@@ -90,8 +90,9 @@ pip uninstall -y tensorrt tensorrt-libs tensorrt-bindings tensorrt_cu12 tensorrt
 # tensorrt 메타패키지는 빌드 중 내부에서 pip 호출하다 격리env 서 깨짐 → libs/bindings 직접 설치 후
 # 메타는 --no-build-isolation 으로(이미 만족된 의존성 재호출 안 함).
 pip install --upgrade pip >/dev/null
-pip install tensorrt-libs==8.6.1 tensorrt-bindings==8.6.1 "cuda-python<12.9" --extra-index-url https://pypi.nvidia.com
-pip install tensorrt==8.6.1 --no-build-isolation --extra-index-url https://pypi.nvidia.com
+pip install tensorrt-libs==8.6.1 tensorrt-bindings==8.6.1 "cuda-python<12.9" \
+  nvidia-cudnn-cu12==8.9.7.29 --extra-index-url https://pypi.nvidia.com   # TRT8.6 은 cuDNN8 필요(토치는 cuDNN9)
+pip install tensorrt==8.6.1 --no-build-isolation --extra-index-url https://pypi.nvidia.com || true  # 메타 실패해도 모듈 있으면 OK
 
 # env 고정 — DittoModel 이 이걸로 SDK 로드.
 # DATA_ROOT 는 aux_models/ 와 models/ 를 품은 디렉토리(=ditto_pytorch). aux_models(det_10g.onnx)의
