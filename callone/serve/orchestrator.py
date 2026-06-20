@@ -373,30 +373,44 @@ class Orchestrator:
         if not user_text.strip():
             yield ("end", "")
             return
-        first = False
+        # 1) LLM 응답 전체 수집 — full 합성으로 studio 와 **같은 음색**(우선순위 1: 목소리 유사도).
+        #    문장별 독립 합성은 운율 불연속(톤 튐)으로 음색이 덜 닮음 → 통째 1회가 충실도 최선.
         emotion = "neutral"
         parts: list[str] = []
-        t_tts_first = 0.0
-        sr_out = getattr(self.tts, "sr", 24000)
+        t_llm_first = 0.0
         for sentence in self.llm.chat_stream(user_text, self.history):
+            if not t_llm_first:
+                t_llm_first = time.time()
             if self._interrupt.is_set():
                 yield ("interrupted", None); break
             emotion, clean = _parse_emotion(sentence, emotion)   # §4-1 감정 추출
-            if not clean:
-                continue
-            if parts and self.sentence_pause_ms > 0:             # 문장 사이 텀(무음)
-                yield ("audio", _silence(sr_out, self.sentence_pause_ms))
-            parts.append(clean)
+            if clean:
+                parts.append(clean)
+        t_llm_done = time.time()
+        reply = " ".join(parts)
+        if reply and not self._interrupt.is_set():
             yield ("emotion", emotion)
-            yield ("text", clean)
-            for chunk in _tts_stream_emo(self.tts, clean, emotion):
+            yield ("text", reply)
+
+        # 2) 합성: full=응답 통째 1회(음색 일관=studio 동일) / sentence=문장별+무음. 청크마다 audio(+frame),
+        #    barge-in 은 청크마다 존중. 토킹헤드는 같은 오디오로 프레임 생성(오디오가 master clock).
+        first = False
+        t_tts_first = 0.0
+        sr_out = getattr(self.tts, "sr", 24000)
+        segments = [reply] if self.synth_mode == "full" else parts
+        for i, seg in enumerate(segments):
+            if self._interrupt.is_set():
+                yield ("interrupted", None); break
+            if i > 0 and self.sentence_pause_ms > 0:             # 세그먼트 사이 텀(무음)
+                yield ("audio", _silence(sr_out, self.sentence_pause_ms))
+            for chunk in _tts_stream_emo(self.tts, seg, emotion):
                 if self._interrupt.is_set():
                     yield ("interrupted", None); break
                 if not first:
                     t_tts_first = time.time()
                     yield ("latency", (t_tts_first - t0) * 1000); first = True
                 yield ("audio", chunk)
-                # 토킹헤드(선택): 같은 오디오로 얼굴 프레임 생성 → ("frame", jpeg). 없으면 스킵.
+                # 토킹헤드(선택): 같은 오디오로 얼굴 프레임 → ("frame", jpeg). 없으면 스킵.
                 if self.avatar is not None:
                     try:
                         for fr in self.avatar.frames_for(chunk, sr_out):
@@ -407,13 +421,15 @@ class Orchestrator:
             else:
                 continue
             break
-        reply = " ".join(parts)
+
         if reply:
             self.history.append({"role": "user", "content": user_text})
             self.history.append({"role": "assistant", "content": reply})
         yield ("timing", {
             "asr_ms": (t_asr - t0) * 1000,
-            "tts_first_ms": (t_tts_first - t_asr) * 1000 if t_tts_first else 0.0,
+            "llm_first_ms": (t_llm_first - t_asr) * 1000 if t_llm_first else 0.0,
+            "llm_total_ms": (t_llm_done - t_asr) * 1000,
+            "tts_first_ms": (t_tts_first - t_llm_done) * 1000 if t_tts_first else 0.0,
             "first_audio_ms": (t_tts_first - t0) * 1000 if t_tts_first else 0.0,
         })
         yield ("end", reply)
