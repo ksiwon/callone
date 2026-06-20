@@ -319,8 +319,13 @@ class Orchestrator:
             if callable(fn):
                 try:
                     fn(ref_audio, ref_sr, ref_text)
+                    # 세션 ref 로 TTS CUDA graph 미리 캡처(~10s) → **첫 턴 콜드 제거**.
+                    # init_session 은 executor(별 스레드)서 도니 이벤트 루프 안 막음. "연결 중" 동안 처리.
+                    if getattr(self.tts, "ref_wav", None):
+                        for _ in _tts_stream_emo(self.tts, "네, 안녕하세요.", "neutral"):
+                            pass
                 except Exception as e:  # noqa: BLE001
-                    log.warning("세션 ref 설정 실패(%s)", e)
+                    log.warning("세션 ref 설정/예열 실패(%s)", e)
         # 얼굴(사진 bytes) — avatar 켜져 있을 때만 세션 아바타 구성.
         if portrait is not None and bool((self._cfg.get("avatar") or {}).get("enabled", False)):
             try:
