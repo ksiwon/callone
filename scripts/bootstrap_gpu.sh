@@ -23,6 +23,10 @@ SPK="${SPK:-sis}"
 LLM_REPO="HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive"
 TTS_REPO="Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 LBIN="$CALLONE_HOME/llama.cpp/build/bin/llama-server"
+# 프리빌트 llama-server(미리 빌드해 HF 에 올려둔 것). 기본으로 받아 **컴파일 생략**.
+#   다른 이미지(CUDA/glibc 불일치)면 실행검사 실패 → 자동 컴파일 폴백(아래 [2/5]).
+#   강제로 직접 컴파일하려면:  LLAMA_SERVER_URL= bash scripts/bootstrap_gpu.sh  (빈 값)
+LLAMA_SERVER_URL="${LLAMA_SERVER_URL-https://huggingface.co/ksiwon/callone-llama-bin/resolve/main/llama-bin.tgz}"
 
 echo "== callone GPU bootstrap =="
 echo "   CALLONE_HOME=$CALLONE_HOME  speaker=$SPK"
@@ -43,17 +47,27 @@ command -v huggingface-cli >/dev/null || pip install -q "huggingface_hub[cli]" |
 pip install -q hf_transfer 2>/dev/null || true
 
 # ── 2. llama-server: 있으면 스킵 / URL 주면 다운 / 아니면 native 컴파일 ────
-if [ -x "$LBIN" ]; then
-  echo "[2/5] llama-server 있음 → 빌드 스킵 ($LBIN)"
-elif [ -n "${LLAMA_SERVER_URL:-}" ]; then
-  echo "[2/5] 프리빌트 다운로드: $LLAMA_SERVER_URL (컴파일 스킵)"
+DL_OK=0
+if [ -x "$LBIN" ] && "$LBIN" --version >/dev/null 2>&1; then
+  echo "[2/5] llama-server 있음 → 빌드 스킵 ($LBIN)"; DL_OK=1
+elif [ -n "$LLAMA_SERVER_URL" ]; then
+  echo "[2/5] 프리빌트 다운로드 시도: $LLAMA_SERVER_URL"
   mkdir -p "$(dirname "$LBIN")"
-  curl -fSL "$LLAMA_SERVER_URL" -o /tmp/llama-bin.tgz
-  tar -xzf /tmp/llama-bin.tgz -C "$(dirname "$LBIN")"
-  chmod +x "$LBIN" 2>/dev/null || true
-  [ -x "$LBIN" ] || { echo "⚠️ 다운본에 llama-server 없음 → 컴파일로 폴백"; bash scripts/build_llama_cuda.sh; }
-else
-  echo "[2/5] llama-server 컴파일(native 아키)... 한 번만. 다음 인스턴스 위해 끝나고 pack 안내 출력"
+  if curl -fSL "$LLAMA_SERVER_URL" -o /tmp/llama-bin.tgz \
+     && tar -xzf /tmp/llama-bin.tgz -C "$(dirname "$LBIN")"; then
+    chmod +x "$LBIN" 2>/dev/null || true
+    # 글ibc/CUDA 호환 안 되면 추출은 돼도 실행이 안 된다 → --version 으로 실제 동작 검사.
+    if [ -x "$LBIN" ] && "$LBIN" --version >/dev/null 2>&1; then
+      echo "   ✅ 프리빌트 동작 OK → 컴파일 생략"; DL_OK=1
+    else
+      echo "   ⚠️ 프리빌트가 이 이미지서 실행 안 됨(CUDA/glibc 불일치) → 컴파일로 폴백"
+    fi
+  else
+    echo "   ⚠️ 다운로드/해제 실패 → 컴파일로 폴백"
+  fi
+fi
+if [ "$DL_OK" != "1" ]; then
+  echo "[2/5] llama-server 컴파일(native 아키)... (끝나면 pack 안내 출력 — 다음 인스턴스용)"
   bash scripts/build_llama_cuda.sh
 fi
 

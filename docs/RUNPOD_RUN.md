@@ -18,15 +18,16 @@
 if [ -d /workspace ] && [ -w /workspace ]; then export CALLONE_HOME=/workspace; else export CALLONE_HOME=$HOME; fi
 cd "$CALLONE_HOME" && git clone https://github.com/ksiwon/callone.git && cd callone
 
-# 1) 한 방: venv→llama.cpp(native 컴파일)→모델 다운→llama-server 기동·health 까지
+# 1) 한 방: venv→llama-server(프리빌트 HF 다운, 컴파일 생략)→모델 다운→기동·health 까지
 SPK=sis bash scripts/bootstrap_gpu.sh
 ```
+- **llama.cpp 는 기본으로 HF 의 프리빌트(ksiwon/callone-llama-bin)를 받아 컴파일을 건너뛴다.** 다른 이미지라
+  실행 안 되면(CUDA/glibc 불일치) **자동으로 native 컴파일 폴백**. 강제 컴파일: `LLAMA_SERVER_URL= bash scripts/bootstrap_gpu.sh`.
 - 화자 참조음성(§5)은 개인 파일이라 자동 못 받는다 → **부트스트랩이 "없음" 경고하면 §5 로 만들고 다시 실행**(나머지는 스킵돼 빠름).
-- **컴파일을 아예 없애려면**(인스턴스 자주 지우는 경우): 첫 인스턴스서 빌드 끝난 뒤 바이너리를 한 번 올려두고, 다음부턴 그 URL 로 다운만:
+- **새로 컴파일했다면**(폴백 발생 등) 그 바이너리를 올려 프리빌트를 갱신하면 다음부턴 또 빨라진다:
   ```bash
-  tar czf /tmp/llama-bin.tgz -C "$CALLONE_HOME/llama.cpp/build/bin" .   # 빌드 결과 묶기
-  # 이 tgz 를 본인 HF/S3/깃릴리스 등에 업로드 → 다음 인스턴스서:
-  LLAMA_SERVER_URL=<업로드한 URL> SPK=sis bash scripts/bootstrap_gpu.sh  # 컴파일 0, 다운만
+  tar czf /tmp/llama-bin.tgz -C "$CALLONE_HOME/llama.cpp/build/bin" .
+  hf upload ksiwon/callone-llama-bin /tmp/llama-bin.tgz llama-bin.tgz   # write 토큰 로그인 필요
   ```
 - 끝나면 바로: `callone-bench --speaker sis --turns 5 --text "여보세요"` / `GRADIO_SHARE=1 python -m studio`.
 
