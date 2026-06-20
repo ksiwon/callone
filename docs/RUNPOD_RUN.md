@@ -9,6 +9,31 @@
 
 ---
 
+## ⚡ 빠른 길 — 원샷 부트스트랩 (인스턴스 자주 새로 파는 사람용)
+
+아래 2~9번을 **idempotent 한 스크립트 하나**로 끝낸다. venv·빌드·모델 중 **이미 된 건 자동 스킵** →
+인스턴스를 지웠다 새로 만들어도 중복작업 0. (Pod 생성 §0 + 참조음성 §5 만 사람 손 필요.)
+```bash
+# 0) Pod 생성(§0) 후, 영속폴더 자동선택 + 코드
+if [ -d /workspace ] && [ -w /workspace ]; then export CALLONE_HOME=/workspace; else export CALLONE_HOME=$HOME; fi
+cd "$CALLONE_HOME" && git clone https://github.com/ksiwon/callone.git && cd callone
+
+# 1) 한 방: venv→llama.cpp(native 컴파일)→모델 다운→llama-server 기동·health 까지
+SPK=sis bash scripts/bootstrap_gpu.sh
+```
+- 화자 참조음성(§5)은 개인 파일이라 자동 못 받는다 → **부트스트랩이 "없음" 경고하면 §5 로 만들고 다시 실행**(나머지는 스킵돼 빠름).
+- **컴파일을 아예 없애려면**(인스턴스 자주 지우는 경우): 첫 인스턴스서 빌드 끝난 뒤 바이너리를 한 번 올려두고, 다음부턴 그 URL 로 다운만:
+  ```bash
+  tar czf /tmp/llama-bin.tgz -C "$CALLONE_HOME/llama.cpp/build/bin" .   # 빌드 결과 묶기
+  # 이 tgz 를 본인 HF/S3/깃릴리스 등에 업로드 → 다음 인스턴스서:
+  LLAMA_SERVER_URL=<업로드한 URL> SPK=sis bash scripts/bootstrap_gpu.sh  # 컴파일 0, 다운만
+  ```
+- 끝나면 바로: `callone-bench --speaker sis --turns 5 --text "여보세요"` / `GRADIO_SHARE=1 python -m studio`.
+
+> 아래 1~10번은 **단계별 수동/디버그용**(부트스트랩이 막히면 해당 번호만 손으로). 처음이거나 잘 돌면 위 빠른 길만으로 충분.
+
+---
+
 ## 0. Pod / 인스턴스 생성
 
 **GPU (24GB 이상 필수):**
