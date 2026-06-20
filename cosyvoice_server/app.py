@@ -37,6 +37,7 @@ from cosyvoice.cli.cosyvoice import AutoModel  # type: ignore
 MODEL_DIR = os.environ.get("COSYVOICE_MODEL_DIR", "pretrained_models/Fun-CosyVoice3-0.5B")
 PORT = int(os.environ.get("PORT", "8092"))
 OUT_SR = 24000   # callone/프론트 재생 sr 통일
+SEED = int(os.environ.get("COSYVOICE_SEED", "1234"))   # >=0 고정 → 턴마다 음색 일관(Qwen 백엔드와 동일 의도)
 
 print(f"[cosyvoice] 모델 로드: {MODEL_DIR}")
 _cosy = AutoModel(model_dir=MODEL_DIR)
@@ -81,6 +82,11 @@ def synth(req: SynthReq):
     os.close(fd)
     sf.write(ref_path, ref16.astype(np.float32), 16000)
     try:
+        # 시드 고정 → 같은 ref/텍스트면 매 합성 동일 음색(턴 편차 제거). CosyVoice 내부 샘플링도 통일.
+        if SEED >= 0:
+            torch.manual_seed(SEED)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(SEED)
         pt = (req.prompt_text or "").strip()
         if NEEDS_SYS:
             gen = _cosy.inference_zero_shot(req.text.strip(), SYS_PROMPT + pt, ref_path, stream=False)
