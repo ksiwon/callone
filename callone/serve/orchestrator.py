@@ -231,11 +231,14 @@ class Orchestrator:
         t["llm_ms"] = (time.time() - t1) * 1000
 
         t2 = time.time()
-        try:
-            for _ in _tts_stream_emo(self.tts, "네, 안녕하세요.", "neutral"):
-                pass   # 끝까지 소비 → CUDA graph + ref 인코딩 완전 예열
-        except Exception as e:  # noqa: BLE001
-            log.warning("TTS 워밍업 스킵(%s)", e)
+        # ephemeral: ref 가 아직 없으면(통화 시작 시 프론트가 줌) TTS 워밍업 스킵 — 빈 ref 합성
+        # 오류 로그 안 내려고. ref 있으면(디스크/세션) 끝까지 소비해 CUDA graph + ref 인코딩 예열.
+        if getattr(self.tts, "ref_wav", None):
+            try:
+                for _ in _tts_stream_emo(self.tts, "네, 안녕하세요.", "neutral"):
+                    pass
+            except Exception as e:  # noqa: BLE001
+                log.warning("TTS 워밍업 스킵(%s)", e)
         t["tts_ms"] = (time.time() - t2) * 1000
         t["total_ms"] = (time.time() - t0) * 1000
         log.info("워밍업 완료: ASR %.0f + LLM %.0f + TTS %.0f = %.0fms",
@@ -251,17 +254,21 @@ class Orchestrator:
         return ""
 
     def _init_avatar(self, cfg: dict):
-        """토킹헤드 백엔드 준비(선택). enabled=false 거나 사진/서버 없으면 None(음성전용)."""
+        """토킹헤드 백엔드 준비(선택). enabled=false 면 None. **사진 없으면(ephemeral) 통화 시작 시
+        프론트 사진으로 init_session 에서 설정** — 부팅 땐 음성전용(이건 정상, 경고 아님)."""
         acfg = cfg.get("avatar", {}) or {}
         if not bool(acfg.get("enabled", False)):
+            return None
+        img = acfg.get("image") or self._default_portrait(self.speaker)
+        if not img:
+            log.info("avatar: 통화 시작 시 프론트 사진으로 설정(지금은 음성전용 — 정상)")
             return None
         try:
             from .avatar import _pick_avatar
 
             av = _pick_avatar(cfg)
-            img = acfg.get("image") or self._default_portrait(self.speaker)
             av.start_call(img)
-            log.info("토킹헤드 활성: %s (사진 %s)", type(av).__name__, img)
+            log.info("토킹헤드 활성: %s", type(av).__name__)
             return av
         except Exception as e:  # noqa: BLE001
             log.warning("토킹헤드 비활성(%s) — 음성전용", e)
