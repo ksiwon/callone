@@ -36,7 +36,7 @@ fi
 echo "=== [3] Ditto PyTorch 의존성(드라이버 호환 torch) ==="
 # torch 는 드라이버 호환 CUDA 로(서빙 venv 와 동일 전략). 드라이버 구버전이면 import 후 동작검증.
 pip install --index-url "$CUDA_INDEX" torch torchaudio
-pip install librosa opencv-python-headless imageio imageio-ffmpeg scikit-image tqdm "numpy<2.4"
+pip install librosa opencv-python-headless imageio imageio-ffmpeg scikit-image tqdm "numpy<2.4" filetype
 # Ditto repo 자체 requirements 가 있으면 추가(저자 의도 — 버전 충돌나면 위 핀 유지).
 [ -f "$DITTO_REPO/requirements.txt" ] && pip install -r "$DITTO_REPO/requirements.txt" || true
 
