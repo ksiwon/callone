@@ -103,7 +103,9 @@ export default function CallScreen() {
           setLogLines((l) => [...l, `나: ${text}`]); }
       },
       onFrame: (jpegB64) => setFrame(jpegB64),
-      onReady: () => setStatus("통화 중"),
+      // 준비 완료(서버가 음성·사진·graph 다 세팅)되면 그때 마이크 켠다 — 연결 중엔 오디오 안 보냄
+      // (안 그러면 서버가 init 처리 중에 오디오 폭주로 WS 수신큐 오버플로→끊김).
+      onReady: () => { setStatus("통화 중"); startMic(sock); },
     });
     sockRef.current = sock;
 
@@ -115,8 +117,9 @@ export default function CallScreen() {
     if (voiceFile) init.ref_audio_b64 = await fileToBase64(voiceFile);
     if (photoFile) init.portrait_b64 = await fileToBase64(photoFile);
     sock.sessionInit(init);
+  }
 
-    // 마이크 캡처 → 업스트림
+  async function startMic(sock: CallSocket) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const ctx = new AudioContext({ sampleRate: 16000 });
@@ -124,14 +127,13 @@ export default function CallScreen() {
       const src = ctx.createMediaStreamSource(stream);
       const proc = ctx.createScriptProcessor(4096, 1, 1);
       proc.onaudioprocess = (e) => {
-        if (mutedRef.current) return;     // ref 라 통화 중 음소거 즉시 반영(클로저 stale 회피)
+        if (mutedRef.current) return;
         sock.sendAudio(new Float32Array(e.inputBuffer.getChannelData(0)));
       };
       src.connect(proc); proc.connect(ctx.destination);
       cleanupMicRef.current = () => {
         proc.disconnect(); src.disconnect(); stream.getTracks().forEach((tr) => tr.stop());
       };
-      // 상태는 onReady(session_ready)/첫 응답에서 '통화 중'으로 — 여기선 마이크만 준비.
     } catch {
       setStatus("마이크 권한 필요(HTTPS/localhost)");
     }
