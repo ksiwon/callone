@@ -120,6 +120,9 @@ class LlamaPersonaLLM:
                 " disappointed, proud, neutral. 매번 neutral 만 쓰지 말고 맥락에 맞춰 다채롭게."
                 " 예: '[emotion:tender] 아이고 우리 딸~ 밥은 묵었나?'"
             )
+        # Qwen3.5 thinking 강제 OFF(모델레벨 소프트 스위치) — 시스템 프롬프트 붙으면 thinking 이
+        # 다시 켜져 content 가 비는(reasoning_content 로만 가는) 실측 버그 차단. --jinja 와 별개로 확실.
+        sys += "\n\n/no_think"
         return sys
 
     def _messages(self, user_text: str, history: list[dict] | None) -> list[dict]:
@@ -171,6 +174,7 @@ class LlamaPersonaLLM:
             self.url, data=data, headers={"Content-Type": "application/json"})
         buf = ""
         in_think = False
+        yielded = False
         try:
             resp = urllib.request.urlopen(req, timeout=self.timeout)
         except Exception as e:  # noqa: BLE001
@@ -207,6 +211,17 @@ class LlamaPersonaLLM:
                     break
                 sent, buf = buf[:m.start() + 1].strip(), buf[m.end():]
                 if sent:
+                    yielded = True
                     yield sent
         if buf.strip():
+            yielded = True
             yield buf.strip()
+        if not yielded:
+            # 스트리밍이 빈 응답(thinking 누출 등) → 비스트리밍 chat() 폴백(content 보장).
+            log.info("스트리밍 빈 응답 → 비스트리밍 폴백")
+            try:
+                txt = self.chat(user_text, history)
+                if txt.strip():
+                    yield txt.strip()
+            except Exception as e:  # noqa: BLE001
+                log.warning("LLM 비스트리밍 폴백 실패(%s)", e)
