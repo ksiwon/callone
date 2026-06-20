@@ -23,6 +23,7 @@ faster_qwen3_tts.**FasterQwen3TTS** 래핑(실 API 검증 2026-06-17, andimarafi
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 from typing import Iterator
 
@@ -77,14 +78,22 @@ class QwenTTS:
         self.ref_asr_model = str(tcfg.get("ref_transcribe_model", "small"))
         self.emotion_map = tcfg.get("emotion_instruct", EMOTION_MAP)
         # 참조 음색(zero-shot 클론의 핵심): serve.tts.ref_wav 또는 화자 ref 파일
+        # 프라이버시 ephemeral(기본 on): 디스크 ref 없어도 생성 OK → 통화 시작 시 프론트가 보낸
+        #   음성으로 set_reference(인메모리). 디스크 파일은 안 만든다. 끄면(false) 옛 동작(디스크 ref 필수).
+        self.ephemeral = bool(scfg.get("ephemeral", True))
+        self._ephemeral_ref: str | None = None
         self.ref_wav = scfg.get("ref_wav") or self._default_ref()
         if not self.ref_wav:
-            raise RuntimeError(
-                f"Qwen3-TTS zero-shot 클론엔 참조 WAV 필수(화자={speaker}). "
-                f"data/speakers/{speaker}/ref_24k.wav 두거나 serve.yaml tts.ref_wav 지정. "
-                f"미지정 시 orchestrator 가 Piper 폴백.")
-        # ref_text(ICL 모드 필수): config → ref_text.txt(권장) → 자동전사 폴백.
-        self.ref_text = scfg.get("ref_text") or self._resolve_ref_text()
+            if not self.ephemeral:
+                raise RuntimeError(
+                    f"Qwen3-TTS zero-shot 클론엔 참조 WAV 필수(화자={speaker}). "
+                    f"data/speakers/{speaker}/ref_24k.wav 두거나 serve.yaml tts.ref_wav 지정. "
+                    f"미지정 시 orchestrator 가 Piper 폴백.")
+            log.info("디스크 ref 없음(ephemeral) — 통화 시작 시 set_reference(프론트 음성)로 인메모리 설정")
+            self.ref_text = ""
+        else:
+            # ref_text(ICL 모드 필수): config → ref_text.txt(권장) → 자동전사 폴백.
+            self.ref_text = scfg.get("ref_text") or self._resolve_ref_text()
         # ⚠️ faster_qwen3_tts 는 LoRA 미지원 — 학습 어댑터가 있어도 서빙엔 못 붙음(Piper 사용 권장).
         adapter = Path(tcfg.get("output_dir", "models/tts_server")) / speaker
         if adapter.exists():
@@ -125,11 +134,64 @@ class QwenTTS:
                 torch.cuda.empty_cache()
             except Exception:  # noqa: BLE001
                 pass
-            log.info("ref_text 자동전사: %s", t[:40])
+            log.info("ref_text 자동전사 완료(%d자)", len(t))   # 프라이버시: 전사 본문 로그 안 남김
             return t
         except Exception as e:  # noqa: BLE001
             log.warning("ref_text 자동전사 실패(%s) — 빈 ref_text(품질 저하 가능)", e)
             return ""
+
+    # ----- 통화 세션용 인메모리 ref(디스크 영속 0, 프라이버시) ------------
+    def set_reference(self, audio: np.ndarray, sr: int, ref_text: str | None = None) -> None:
+        """프론트가 통화 시작 시 보낸 음성으로 ref 교체 — **RAM(tmpfs)에만**, 영속 디스크 0.
+        cleanup_reference() 로 즉시 삭제. ref_text 없으면 ndarray 직접 전사(파일 안 만듦)."""
+        import soundfile as sf
+
+        self.cleanup_reference()
+        base = ("/dev/shm" if os.path.isdir("/dev/shm") and os.access("/dev/shm", os.W_OK)
+                else tempfile.gettempdir())
+        fd, path = tempfile.mkstemp(suffix=".wav", prefix="callone_ref_", dir=base)
+        os.close(fd)
+        a = np.asarray(audio, dtype=np.float32)
+        sf.write(path, a, int(sr))
+        self.ref_wav = path
+        self._ephemeral_ref = path
+        self.ref_text = (ref_text.strip() if ref_text and ref_text.strip()
+                         else self._transcribe_array(a, int(sr)))
+        log.info("세션 ref 설정(인메모리, %.1fs, ref_text %d자)",
+                 len(a) / max(1, sr), len(self.ref_text))
+
+    def _transcribe_array(self, audio: np.ndarray, sr: int) -> str:
+        """ndarray 직접 전사(파일 안 만듦). 실패 시 빈 문자열."""
+        try:
+            from faster_whisper import WhisperModel
+
+            m = WhisperModel(self.ref_asr_model, device=resolve_device(),
+                             compute_type=compute_type_for())
+            a = audio if sr == 16000 else np.interp(
+                np.linspace(0, len(audio), int(len(audio) * 16000 / sr), endpoint=False),
+                np.arange(len(audio)), audio).astype("float32")
+            segs, _ = m.transcribe(a, language="ko")
+            t = "".join(s.text for s in segs).strip()
+            del m
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001
+                pass
+            return t
+        except Exception as e:  # noqa: BLE001
+            log.warning("인메모리 전사 실패(%s)", e)
+            return ""
+
+    def cleanup_reference(self) -> None:
+        """세션 종료 — 인메모리 ref tmpfs 파일 즉시 삭제(흔적 0)."""
+        p = getattr(self, "_ephemeral_ref", None)
+        if p and os.path.exists(p):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        self._ephemeral_ref = None
 
     def _load(self):
         try:

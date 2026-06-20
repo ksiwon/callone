@@ -34,18 +34,28 @@ log = get_logger("avatar")
 class AvatarBackend(Protocol):
     fps: int
 
-    def start_call(self, image_path: str) -> None: ...
+    def start_call(self, image) -> None: ...      # image: 경로(str) 또는 bytes(프론트 직접)
     def frames_for(self, audio: np.ndarray, sr: int) -> Iterator[bytes]: ...
     def interrupt(self) -> None: ...
     def stop(self) -> None: ...
 
 
-def _encode_jpeg(image_path: str, resolution: int = 256) -> bytes:
-    """사진 → 정사각 리사이즈 JPEG 바이트. Pillow 없으면 원본 바이트 그대로(이미 jpg/png)."""
+def _image_bytes(image) -> bytes:
+    """경로(str) 또는 bytes 둘 다 받아 원본 바이트 반환. 프론트가 bytes 로 직접 주면 디스크 안 거침."""
+    if isinstance(image, (bytes, bytearray)):
+        return bytes(image)
+    return Path(image).read_bytes()
+
+
+def _encode_jpeg(image, resolution: int = 256) -> bytes:
+    """사진(경로 or bytes) → 정사각 리사이즈 JPEG 바이트. Pillow 없으면 원본 바이트 그대로."""
+    import io as _io
+
+    raw = _image_bytes(image)
     try:
         from PIL import Image  # type: ignore
 
-        im = Image.open(image_path).convert("RGB")
+        im = Image.open(_io.BytesIO(raw)).convert("RGB")
         # 증명사진 가정(정면·얼굴 중앙) → 가운데 정사각 크롭 후 resolution 리사이즈.
         w, h = im.size
         s = min(w, h)
@@ -56,7 +66,7 @@ def _encode_jpeg(image_path: str, resolution: int = 256) -> bytes:
         return buf.getvalue()
     except Exception as e:  # noqa: BLE001
         log.warning("Pillow 인코딩 불가(%s) — 원본 바이트 사용", e)
-        return Path(image_path).read_bytes()
+        return raw
 
 
 class StaticImageAvatar:
@@ -72,12 +82,12 @@ class StaticImageAvatar:
         self._frame: bytes | None = None
         self._interrupt = threading.Event()
 
-    def start_call(self, image_path: str) -> None:
-        if not image_path or not Path(image_path).exists():
-            raise RuntimeError(f"avatar 사진 없음: {image_path!r}")
-        self._frame = _encode_jpeg(image_path, self.resolution)
-        log.info("StaticImageAvatar: %s (%dB, %dpx, %dfps)",
-                 image_path, len(self._frame), self.resolution, self.fps)
+    def start_call(self, image) -> None:
+        if not isinstance(image, (bytes, bytearray)) and (not image or not Path(image).exists()):
+            raise RuntimeError(f"avatar 사진 없음: {image!r}")
+        self._frame = _encode_jpeg(image, self.resolution)
+        log.info("StaticImageAvatar: 사진 등록(%dB, %dpx, %dfps)",
+                 len(self._frame), self.resolution, self.fps)   # 프라이버시: 경로 로그 안 남김
 
     def frames_for(self, audio: np.ndarray, sr: int) -> Iterator[bytes]:
         if self._frame is None:
@@ -138,21 +148,25 @@ class DittoAvatar:
                 f"avatar-server 응답 없음({self.base_url}). 별도 프로세스로 띄워야 함"
                 f"(scripts/setup_avatar_gpu.sh, GPU). 미가동 시 StaticImage 폴백: {e}") from e
 
-    def start_call(self, image_path: str) -> None:
+    def start_call(self, image) -> None:
         import base64
         import json
         import urllib.request
 
-        if not image_path or not Path(image_path).exists():
-            raise RuntimeError(f"avatar 사진 없음: {image_path!r}")
-        img_b64 = base64.b64encode(Path(image_path).read_bytes()).decode()
+        if isinstance(image, (bytes, bytearray)):
+            raw = bytes(image)
+        elif image and Path(image).exists():
+            raw = Path(image).read_bytes()
+        else:
+            raise RuntimeError(f"avatar 사진 없음: {image!r}")
+        img_b64 = base64.b64encode(raw).decode()
         body = json.dumps({"image_b64": img_b64, "fps": self.fps,
                            "resolution": self.resolution, "sr": self.sr}).encode()
         req = urllib.request.Request(f"{self.base_url}/session/start", data=body,
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             self.session_id = json.loads(r.read().decode()).get("session_id")
-        log.info("DittoAvatar 세션 시작: %s (사진 %s)", self.session_id, image_path)
+        log.info("DittoAvatar 세션 시작: %s", self.session_id)   # 프라이버시: 사진 경로 로그 안 남김
 
     def _ensure_ws(self):
         """세션 WS 를 lazy 연결(청크마다 재사용). websocket-client 필요."""

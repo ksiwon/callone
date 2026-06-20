@@ -57,6 +57,27 @@ def list_speakers() -> list[dict]:
     return out
 
 
+def _parse_session_init(ctrl: dict) -> dict:
+    """session_init 메시지 → orch.init_session kwargs. 전부 인메모리(디스크 파일 안 만듦)."""
+    import base64
+    import io
+
+    kw: dict = {"persona": ctrl.get("persona"), "situation": ctrl.get("situation"),
+                "ref_text": ctrl.get("ref_text"), "history": ctrl.get("history")}
+    if ctrl.get("ref_audio_b64"):
+        import soundfile as sf
+
+        raw = base64.b64decode(ctrl["ref_audio_b64"])
+        a, asr = sf.read(io.BytesIO(raw), dtype="float32")
+        if getattr(a, "ndim", 1) > 1:
+            a = a.mean(axis=1)
+        kw["ref_audio"] = a
+        kw["ref_sr"] = int(asr)
+    if ctrl.get("portrait_b64"):
+        kw["portrait"] = base64.b64decode(ctrl["portrait_b64"])
+    return kw
+
+
 def create_app():
     if FastAPI is None:
         raise RuntimeError("fastapi 미설치 — pip install fastapi uvicorn")
@@ -149,6 +170,9 @@ def create_app():
                     elif kind == "text":
                         await ws.send_text(json.dumps({"type": "reply", "text": val},
                                                       ensure_ascii=False))
+                    elif kind == "user":   # 사용자 전사 → 클라가 대화이력(export)에 기록
+                        await ws.send_text(json.dumps({"type": "user", "text": val},
+                                                      ensure_ascii=False))
                     elif kind == "latency":
                         await ws.send_text(json.dumps({"type": "latency_ms", "value": val}))
                     elif kind == "interrupted":
@@ -158,12 +182,18 @@ def create_app():
                 await gen
                 await ws.send_text(json.dumps({"type": "audio_end"}))
 
+        loop = asyncio.get_running_loop()
         try:
             while True:
                 msg = await ws.receive()
                 if "text" in msg and msg["text"]:
                     ctrl = json.loads(msg["text"])
-                    if ctrl.get("type") == "end_turn":
+                    if ctrl.get("type") == "session_init":
+                        # 프라이버시: 프론트가 보낸 음성/사진/이력으로 세션 구성(전부 인메모리).
+                        kw = _parse_session_init(ctrl)
+                        await loop.run_in_executor(None, lambda: orch.init_session(**kw))
+                        await ws.send_text(json.dumps({"type": "session_ready"}))
+                    elif ctrl.get("type") == "end_turn":
                         audio = np.concatenate(buf) if buf else np.zeros(1, np.float32)
                         buf = []
                         await _stream_reply(audio)
@@ -173,6 +203,12 @@ def create_app():
                     buf.append(np.frombuffer(msg["bytes"], dtype=np.float32))
         except WebSocketDisconnect:
             log.info("통화 종료 speaker=%s", speaker_id)
+        finally:
+            # 프라이버시: 연결 끊기면 인메모리 개인데이터(ref tmpfs·이력·아바타) 즉시 폐기.
+            try:
+                await loop.run_in_executor(None, orch.cleanup_session)
+            except Exception:  # noqa: BLE001
+                pass
 
     return app
 

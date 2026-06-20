@@ -177,6 +177,7 @@ def _silence(sr: int, ms: int) -> np.ndarray:
 class Orchestrator:
     def __init__(self, speaker: str, serve_cfg: dict | None = None):
         cfg = serve_cfg or load_config("serve")
+        self._cfg = cfg
         self.speaker = speaker
         self.vad = VAD(cfg.get("vad", {}))
         self.asr = StreamASR(cfg.get("asr", {}))
@@ -194,6 +195,9 @@ class Orchestrator:
         self.sentence_pause_ms = int(tcfg.get("sentence_pause_ms", 180))
         self.history: list[dict] = []
         self._interrupt = threading.Event()
+        # 프라이버시: 기본 false → 로그에 사용자 발화/응답 본문을 절대 안 남긴다(길이·지연만).
+        #   디버그로 잠깐 볼 땐 serve.yaml log_content: true. 개인데이터 로그 누출 원천차단.
+        self.log_content = bool(cfg.get("log_content", False))
         # 토킹헤드(선택, 기본 off): 사진→움직이는 얼굴. 없거나 실패해도 음성은 그대로(부가 레이어).
         self.avatar = self._init_avatar(cfg)
         # 워밍업: 부팅 시 ASR/LLM/TTS 더미 1회 → CUDA graph 빌드 + ref 인코딩 + 슬롯 예열.
@@ -289,6 +293,67 @@ class Orchestrator:
         """새 통화 시작 — 대화 이력 초기화."""
         self.history = []
 
+    # ----- 프라이버시 세션(인메모리, 디스크·로그 영속 0) ------------------
+    def init_session(self, *, ref_audio=None, ref_sr: int = 24000, ref_text=None,
+                     portrait=None, persona=None, situation=None, history=None):
+        """통화 시작 — 프론트가 보낸 개인데이터로 세션 구성(전부 **인메모리**).
+
+        ref_audio: 화자 음성 ndarray(목소리 복제) / portrait: 사진 bytes(얼굴) /
+        history: 이전 대화(클라가 보관·복원). 디스크 파일 안 만들고 로그에 본문 안 남긴다.
+        통화 끝나면 cleanup_session() 으로 즉시 폐기."""
+        self.reset_history()
+        if history:
+            self.history = list(history)
+        if (persona and persona.strip()) or (situation and situation.strip()):
+            self.set_context(persona=persona or None, situation=situation or None)
+        # 목소리(인메모리 ref) — TTS 백엔드가 지원하면.
+        if ref_audio is not None:
+            fn = getattr(self.tts, "set_reference", None)
+            if callable(fn):
+                try:
+                    fn(ref_audio, ref_sr, ref_text)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("세션 ref 설정 실패(%s)", e)
+        # 얼굴(사진 bytes) — avatar 켜져 있을 때만 세션 아바타 구성.
+        if portrait is not None and bool((self._cfg.get("avatar") or {}).get("enabled", False)):
+            try:
+                from .avatar import _pick_avatar
+
+                av = _pick_avatar(self._cfg)
+                av.start_call(portrait)            # bytes 직접(디스크 안 거침)
+                if self.avatar is not None:
+                    try:
+                        self.avatar.stop()
+                    except Exception:  # noqa: BLE001
+                        pass
+                self.avatar = av
+            except Exception as e:  # noqa: BLE001
+                log.warning("세션 아바타 설정 실패(%s) — 영상 생략", e)
+                self.avatar = None
+        log.info("세션 시작(인메모리): ref=%s portrait=%s history=%d턴",
+                 ref_audio is not None, portrait is not None, len(self.history) // 2)
+
+    def export_history(self) -> list[dict]:
+        """현재 대화 이력 반환 — 클라가 내보내기/저장용(서버엔 안 남김)."""
+        return list(self.history)
+
+    def cleanup_session(self):
+        """통화 종료 — 인메모리 개인데이터 **즉시 폐기**(흔적 0): ref tmpfs 삭제·이력·아바타 해제."""
+        fn = getattr(self.tts, "cleanup_reference", None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception:  # noqa: BLE001
+                pass
+        if self.avatar is not None:
+            try:
+                self.avatar.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self.avatar = None
+        self.reset_history()
+        log.info("세션 종료 — 인메모리 개인데이터 폐기 완료")
+
     def handle_utterance(self, audio: np.ndarray, sr: int = 16000) -> Turn:
         """완결된 발화 → 응답 텍스트 + 음성 청크 (문장 스트리밍, barge-in 존중)."""
         self._interrupt.clear()
@@ -351,10 +416,16 @@ class Orchestrator:
             self.history.append({"role": "user", "content": user_text})
             self.history.append({"role": "assistant", "content": turn.reply_text})
         tm = turn.timings
-        log.info("턴: '%s' → '%s' (첫음성 %.0fms = ASR %.0f + LLM첫 %.0f + TTS첫 %.0f%s)",
-                 user_text[:30], turn.reply_text[:40], turn.first_audio_latency_ms,
-                 tm.get("asr_ms", 0), tm.get("llm_first_ms", 0), tm.get("tts_first_ms", 0),
-                 ", 중단됨" if turn.interrupted else "")
+        if self.log_content:   # 디버그 전용(기본 off) — 평소엔 본문 로그 0
+            log.info("턴: '%s' → '%s' (첫음성 %.0fms = ASR %.0f + LLM첫 %.0f + TTS첫 %.0f%s)",
+                     user_text[:30], turn.reply_text[:40], turn.first_audio_latency_ms,
+                     tm.get("asr_ms", 0), tm.get("llm_first_ms", 0), tm.get("tts_first_ms", 0),
+                     ", 중단됨" if turn.interrupted else "")
+        else:                  # 프라이버시: 본문 없이 길이·지연만
+            log.info("턴 완료(usr %d자→rep %d자, 첫음성 %.0fms = ASR %.0f + LLM첫 %.0f + TTS첫 %.0f%s)",
+                     len(user_text), len(turn.reply_text), turn.first_audio_latency_ms,
+                     tm.get("asr_ms", 0), tm.get("llm_first_ms", 0), tm.get("tts_first_ms", 0),
+                     ", 중단됨" if turn.interrupted else "")
         return turn
 
     def stream_audio_chunks(self, audio: np.ndarray, sr: int = 16000) -> Iterator[np.ndarray]:
