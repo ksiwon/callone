@@ -43,8 +43,11 @@ llm:
 tts:
   backend: qwen3-tts           # §2: Qwen3-TTS 1.7B(감정 instruct 통합). 미설치 시 piper/kokoro 폴백
   stream: true
-  first_chunk_target_ms: 700   # 실측: chunk_size=25 → 워밍업 후 첫청크 ~0.67s
-  chunk_size: 25               # 실측(2026-06-17): 8은 끊김 → 25가 톤/지연 최적
+  first_chunk_target_ms: 500   # 실측(A100): chunk_size=15 → 워밍업 후 첫청크 ~0.5s
+  # ⚠️ 첫음성 지연의 최대 단일 병목. A100 A/B(2026-06-20): cs 25→776ms·20→637·15→501·10→366ms.
+  # 음색은 cs 줄여도 거의 불변(사용자 귀 판정) → 15 채택(첫음성 1.64s→~1.29s). 더 줄이려면 10까지
+  # 가능하나 **실시간 스트리밍 끊김**은 저장 wav A/B 로 안 보임 → 라이브 통화로 확인 후 내려라(과거 cs=8 끊김).
+  chunk_size: 15
   temperature: 0.5             # 실측: 0.9 흔들림 → 0.5 톤 안정
   emotion: true                # LLM emotion 키 → instruct 동적 주입
   # 합성 단위: full = 응답 통째 1회(운율 일관·톤 안 튐·구두점 자연 텀, 턴제/짧은응답 권장) /
