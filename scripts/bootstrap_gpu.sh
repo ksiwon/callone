@@ -25,6 +25,7 @@ SPK="${SPK:-sis}"
 LLM_REPO="HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive"
 TTS_REPO="Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 LBIN="$CALLONE_HOME/llama.cpp/build/bin/llama-server"
+NOTHINK_TMPL="$PWD/configs/qwen3_nothink.jinja"   # Qwen3.5 thinking 강제 OFF 템플릿(빈 think 프리필)
 # 프리빌트 llama-server(미리 빌드해 HF 에 올려둔 것). 기본으로 받아 **컴파일 생략**.
 #   다른 이미지(CUDA/glibc 불일치)면 실행검사 실패 → 자동 컴파일 폴백(아래 [2/5]).
 #   강제로 직접 컴파일하려면:  LLAMA_SERVER_URL= bash scripts/bootstrap_gpu.sh  (빈 값)
@@ -121,11 +122,14 @@ fi
 _health() { curl -s "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q '"status"'; }
 _start_verify() {   # 0=정상 / 2=CUDA에러 / 1=기타실패
   pkill -f llama-server 2>/dev/null; sleep 2
-  # --jinja: 모델 jinja 템플릿 사용(thinking 토글/chat_template_kwargs 적용에 필수).
-  # --reasoning-budget 0: Qwen3.5 thinking OFF. 둘 다 없으면 출력이 reasoning_content 로만 가고
-  #   content 가 비어 **빈 응답**(실측: LLM 완료 0자, reasoning_content 만 참). 둘 다 줘야 content 참.
+  # Qwen3.5 thinking 강제 OFF: 모델 임베디드 템플릿이 <think> 강제주입 → enable_thinking:false/
+  #   --reasoning-budget 0 무시되는 llama.cpp 버그(#20182) → content 빔. 우리 no-think 템플릿(빈 think
+  #   프리필)으로 교체하면 모델이 바로 답변 → content 참. 템플릿 없으면 --reasoning-budget 0 로 폴백.
+  TMPL_ARG="--jinja --reasoning-budget 0"
+  [ -f "$NOTHINK_TMPL" ] && TMPL_ARG="--jinja --chat-template-file $NOTHINK_TMPL"
+  echo "    LLM 템플릿: $TMPL_ARG"
   nohup "$LBIN" -m "$GGUF" --host 127.0.0.1 --port "$PORT" \
-    -c 8192 -n 512 --n-gpu-layers 99 --jinja --reasoning-budget 0 > "$CALLONE_HOME/llama.log" 2>&1 &
+    -c 8192 -n 512 --n-gpu-layers 99 $TMPL_ARG > "$CALLONE_HOME/llama.log" 2>&1 &
   for _ in $(seq 1 90); do
     _health && return 0
     grep -qiE 'CUDA error|kernel image is invalid|out of memory' "$CALLONE_HOME/llama.log" && return 2
