@@ -14,6 +14,12 @@ VENV="${VENV:-.venv-avatar}"
 CUDA_INDEX="${CUDA_INDEX:-https://download.pytorch.org/whl/cu124}"
 DITTO_REPO="$CALLONE_HOME/ditto-talkinghead"
 
+echo "=== [0] 시스템 라이브러리(GL/X11/오디오) — Ditto 렌더·cv2 가 요구(libGLESv2.so.2 등) ==="
+sudo apt-get update 2>/dev/null && sudo apt-get install -y \
+  libgl1 libglx-mesa0 libgles2 libegl1 libglvnd0 libglib2.0-0 \
+  libsm6 libxext6 libxrender1 libxi6 libxrandr2 libxfixes3 libgomp1 libsndfile1 ffmpeg \
+  2>/dev/null || echo "[info] apt 생략(권한 없음/이미 있음) — 없으면 Ditto 로드 시 libGLESv2.so.2 등 에러"
+
 echo "=== [1] avatar 전용 venv ($VENV) ==="
 python3 -m venv "$VENV"
 # shellcheck disable=SC1091
