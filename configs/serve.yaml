@@ -32,7 +32,7 @@ llm:
   use_rag: false               # 사실 추출 후 true 로
   embedder: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # fastembed 지원본(한국어 OK)
   rag_min_score: 0.45          # 게이트(MiniLM 기준): 미만이면 기억 안 씀. 허위회상 잦으면 ↑, 회상 약하면 ↓
-  temperature: 0.7             # 사람처럼 생생·다채롭게(강한 스타일프롬프트+토큰캡이 산만함 억제). 횡설수설하면 ↓
+  temperature: 0.4             # 실측(aggressive abliterated 9B): 0.7 은 한국어 비문 잦음 → 0.4 가 문법 안정. 더 생생하게는 ↑(품질 trade)
   top_p: 0.8
   top_k: 20
   max_new_tokens: 64           # 전화 턴 짧게(LoRA 가 길게 주절거리는 것 캡)
@@ -49,7 +49,10 @@ tts:
   # 가능하나 **실시간 스트리밍 끊김**은 저장 wav A/B 로 안 보임 → 라이브 통화로 확인 후 내려라(과거 cs=8 끊김).
   chunk_size: 15
   temperature: 0.5             # 실측: 0.9 흔들림 → 0.5 톤 안정
-  emotion: true                # LLM emotion 키 → instruct 동적 주입
+  # 감정 instruct: 동적 톤 변화. 단 instruct 가 제로샷 음색을 원본에서 밀어내 **덜 닮게** 만들고,
+  # 톤이 문맥과 안 맞으면 더 어색. 실통화 판정(2026-06-20): 충실도 최우선 → false(neutral 고정 = 최대 충실도).
+  # 풍부한 감정이 더 중요하면 true(음색 충실도와 trade). 진짜 감정+충실도는 화자 학습본이 답.
+  emotion: false
   # 합성 단위: full = 응답 통째 1회(운율 일관·톤 안 튐·구두점 자연 텀, 턴제/짧은응답 권장) /
   #           sentence = 문장별(첫음성 최저지연, WS 실시간용). 문장 사이엔 무음 텀.
   synth_mode: full
