@@ -73,6 +73,9 @@ class QwenTTS:
         ic = tcfg.get("inference", {})
         self.chunk_size = int(scfg.get("chunk_size", ic.get("chunk_size", 25)))
         self.temperature = float(scfg.get("temperature", ic.get("temperature", 0.5)))
+        # 시드 고정(>=0): temperature 샘플링 난수를 매 합성 동일 시작 → **턴마다 음색 편차 제거**.
+        # -1 이면 매번 랜덤(편차 큼). 우선순위①(목소리 일관) 위해 기본 고정.
+        self.seed = int(scfg.get("seed", ic.get("seed", 1234)))
         self.device = str(scfg.get("device", tcfg.get("device", "cuda")))
         self.dtype_name = str(tcfg.get("dtype", "bfloat16"))
         self.ref_asr_model = str(tcfg.get("ref_transcribe_model", "small"))
@@ -217,6 +220,15 @@ class QwenTTS:
         if not text.strip():
             return
         instruct = self._instruct(emotion)
+        # 시드 고정 → 같은 ref/텍스트면 매 턴 동일 음색(편차 제거). CUDA graph 라도 샘플링 RNG 시작 통일.
+        if self.seed >= 0:
+            try:
+                import torch
+                torch.manual_seed(self.seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(self.seed)
+            except Exception:  # noqa: BLE001
+                pass
         try:
             for audio_chunk, sr, _timing in self._tts.generate_voice_clone_streaming(
                     text=text, language=self.language,

@@ -19,7 +19,7 @@ finetune:
   lora_alpha: 32
   batch_size: 4
   # 학습 전 체크: 24kHz 리샘플 / annotation 태그 제거 / 클립끝 1초 묵음 / commit 680d4e9+ / PR#178
-ref_transcribe_model: "small"  # ref_text.txt 없을 때 자동전사용(권장: ref_text.txt 직접 두기)
+ref_transcribe_model: "large-v3-turbo"  # ref_text 자동전사 정확도↑(ICL 정렬 정확→클론 충실도↑). 통화ASR과 동일모델=이미 다운로드됨(추가 로드 X). (느리면 small)
 inference:
   lora_scale: 0.3              # (서빙 미사용 — faster_qwen3_tts LoRA 미지원)
   chunk_size: 25               # 실측(2026-06-17): 8은 끊김 → 25가 톤/지연 최적(첫청크 ~0.67s)
@@ -31,7 +31,7 @@ emotion_instruct:
   happy:   "Speak in the same natural voice, just slightly bright and warm."
   sad:     "Speak in the same natural voice, just slightly soft and downcast."
   angry:   "Speak in the same natural voice, just slightly firm and annoyed."
-  neutral: "Speak in a natural, relaxed, conversational tone."
+  neutral: ""    # 충실도 최우선: instruct 비움 = 원본 음색 그대로(어떤 지시도 음색을 밀어냄). emotion:false 면 이게 항상 적용
   excited: "Speak in the same natural voice, just a bit livelier and upbeat."
   surprised: "Speak in the same natural voice, with a brief light surprise."
   tender: "Speak in the same natural voice, just slightly soft and affectionate."
