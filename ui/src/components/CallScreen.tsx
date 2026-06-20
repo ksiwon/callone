@@ -210,7 +210,7 @@ export default function CallScreen() {
       <Log>{logLines.map((l, i) => <div key={i}>{l}</div>)}</Log>
       <Controls>
         <Btn onClick={toggleMute}>{muted ? "음소거 해제" : "음소거"}</Btn>
-        <Btn onClick={() => sockRef.current?.endTurn()}>말끝</Btn>
+        <Btn onClick={() => sockRef.current?.endTurn()}>응답 전송</Btn>
         <Btn onClick={exportHistory}>대화 내보내기</Btn>
         <Btn danger onClick={endCall}>종료</Btn>
       </Controls>
