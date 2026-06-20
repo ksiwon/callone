@@ -48,8 +48,12 @@ def _jpeg(frame_rgb: np.ndarray, resolution: int) -> bytes:
     from PIL import Image
 
     im = Image.fromarray(np.asarray(frame_rgb).astype("uint8"))
-    if im.size != (resolution, resolution):
-        im = im.resize((resolution, resolution))
+    # 원본 비율 유지(정사각 강제 리사이즈는 찌그러짐). 긴 변만 maxside 로 제한(대역폭 절충).
+    maxside = max(resolution * 2, 256)              # resolution=256 → 긴 변 512
+    w, h = im.size
+    if max(w, h) > maxside:
+        s = maxside / float(max(w, h))
+        im = im.resize((max(1, int(w * s)), max(1, int(h * s))))
     buf = io.BytesIO()
     im.save(buf, format="JPEG", quality=90)
     return buf.getvalue()

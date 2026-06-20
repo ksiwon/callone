@@ -23,12 +23,23 @@ const Wave = styled.div<{ active: boolean }>`
   @keyframes bounce { 0%,100%{height:8px} 50%{height:40px} }
 `;
 const Avatar = styled.img`
-  width: 256px; height: 256px; border-radius: 16px; object-fit: cover;
+  /* 비율 유지(정사각 강제 X) + 크게. 긴 변 기준으로 화면에 맞춤. */
+  width: auto; height: auto; max-width: min(48vw, 540px); max-height: 74vh;
+  border-radius: 16px; object-fit: contain;
   background: #000; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 `;
+/* 통화화면 본문: 좌(대화/버튼) | 우(얼굴) 2단. 좁은 화면이면 세로로 쌓임. */
+const Stage = styled.div`
+  flex: 1; width: 100%; display: flex; gap: 28px; align-items: center;
+  justify-content: center; flex-wrap: wrap;
+`;
+const Panel = styled.div`
+  display: flex; flex-direction: column; gap: 16px;
+  flex: 1 1 320px; max-width: 480px; min-width: 280px;
+`;
 const Log = styled.div`
-  width: 100%; max-width: 480px; max-height: 26vh; overflow-y: auto;
-  color: ${(p) => p.theme.colors.sub}; font-size: 14px;
+  width: 100%; max-height: 44vh; overflow-y: auto;
+  color: ${(p) => p.theme.colors.sub}; font-size: 14px; line-height: 1.5;
 `;
 const Controls = styled.div`display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;`;
 const Btn = styled.button<{ danger?: boolean }>`
@@ -221,20 +232,24 @@ export default function CallScreen() {
   return (
     <Screen>
       <Who><Big>{id}</Big><Status>{status} · {mm}:{ss}</Status></Who>
-      {frame ? (
-        <Avatar src={`data:image/jpeg;base64,${frame}`} alt="avatar" />
-      ) : (
-        <Wave active={status === "통화 중"}>
-          {Array.from({ length: 9 }).map((_, i) => <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />)}
-        </Wave>
-      )}
-      <Log>{logLines.map((l, i) => <div key={i}>{l}</div>)}</Log>
-      <Controls>
-        <Btn onClick={toggleMute}>{muted ? "음소거 해제" : "음소거"}</Btn>
-        <Btn onClick={() => sockRef.current?.endTurn()}>응답 전송</Btn>
-        <Btn onClick={exportHistory}>대화 내보내기</Btn>
-        <Btn danger onClick={endCall}>종료</Btn>
-      </Controls>
+      <Stage>
+        <Panel>
+          <Log>{logLines.map((l, i) => <div key={i}>{l}</div>)}</Log>
+          <Controls>
+            <Btn onClick={toggleMute}>{muted ? "음소거 해제" : "음소거"}</Btn>
+            <Btn onClick={() => sockRef.current?.endTurn()}>응답 전송</Btn>
+            <Btn onClick={exportHistory}>대화 내보내기</Btn>
+            <Btn danger onClick={endCall}>종료</Btn>
+          </Controls>
+        </Panel>
+        {frame ? (
+          <Avatar src={`data:image/jpeg;base64,${frame}`} alt="avatar" />
+        ) : (
+          <Wave active={status === "통화 중"}>
+            {Array.from({ length: 9 }).map((_, i) => <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />)}
+          </Wave>
+        )}
+      </Stage>
     </Screen>
   );
 }
