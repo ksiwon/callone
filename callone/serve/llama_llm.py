@@ -127,7 +127,14 @@ class LlamaPersonaLLM:
 
     def _messages(self, user_text: str, history: list[dict] | None) -> list[dict]:
         msgs = [{"role": "system", "content": self._system(user_text)}]
-        msgs += list(history or [])[-self.max_history:]   # 통화 맥락 누적(최근 max_history 개)
+        # history 새니타이즈: 클라가 import 한 이력에 None/빈/비문자열 content 나 알 수 없는
+        # role 이 섞이면 (특히 이전 실패 턴이 저장한 빈 응답) chat 템플릿 렌더가 터져 llama 가
+        # 빈손/500 → 통화서 'LLM 0자'. user/assistant + 비어있지 않은 문자열만 통과시킨다.
+        for m in list(history or [])[-self.max_history:]:
+            role = (m or {}).get("role")
+            content = (m or {}).get("content")
+            if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+                msgs.append({"role": role, "content": content})
         msgs.append({"role": "user", "content": user_text})
         return msgs
 
@@ -155,18 +162,26 @@ class LlamaPersonaLLM:
 
     # ----- 생성(비스트리밍) ----------------------------------------------
     def chat(self, user_text: str, history: list[dict] | None = None) -> str:
+        import urllib.error
         import urllib.request
 
         data = json.dumps(self._payload(user_text, history, False)).encode()
         req = urllib.request.Request(
             self.url, data=data, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=self.timeout) as r:
-            obj = json.loads(r.read().decode())
-        text = obj["choices"][0]["message"]["content"]
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                obj = json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            # llama 가 템플릿 렌더 실패 등으로 4xx/5xx 면 본문(원인)을 남긴다.
+            body = e.read().decode("utf-8", "ignore")[:300]
+            log.warning("llama-server HTTP %s: %s", e.code, body)
+            return ""
+        text = obj["choices"][0]["message"].get("content") or ""
         return self._strip_think(text)
 
     # ----- 생성(SSE 스트리밍, 문장 단위 yield) ---------------------------
     def chat_stream(self, user_text: str, history: list[dict] | None = None) -> Iterator[str]:
+        import urllib.error
         import urllib.request
 
         data = json.dumps(self._payload(user_text, history, True)).encode()
@@ -177,45 +192,49 @@ class LlamaPersonaLLM:
         yielded = False
         try:
             resp = urllib.request.urlopen(req, timeout=self.timeout)
+            for raw in resp:
+                line = raw.decode("utf-8", "ignore").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(payload)["choices"][0].get("delta", {})
+                except Exception:  # noqa: BLE001
+                    continue
+                piece = delta.get("content") or ""
+                if not piece:
+                    continue
+                # thinking 블록 토큰 스트림 제거
+                if "<think>" in piece:
+                    in_think = True
+                    piece = piece.split("<think>")[0]
+                if in_think:
+                    if "</think>" in piece:
+                        in_think = False
+                        piece = piece.split("</think>")[-1]
+                    else:
+                        continue
+                buf += piece
+                while True:
+                    m = _SENT_END.search(buf)
+                    if not m:
+                        break
+                    sent, buf = buf[:m.start() + 1].strip(), buf[m.end():]
+                    if sent:
+                        yielded = True
+                        yield sent
+            if buf.strip():
+                yielded = True
+                yield buf.strip()
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "ignore")[:300]
+            log.warning("llama-server 스트림 HTTP %s: %s", e.code, body)
         except Exception as e:  # noqa: BLE001
             log.warning("llama-server 스트림 오류(%s)", e)
-            return
-        for raw in resp:
-            line = raw.decode("utf-8", "ignore").strip()
-            if not line or not line.startswith("data:"):
-                continue
-            payload = line[5:].strip()
-            if payload == "[DONE]":
-                break
-            try:
-                delta = json.loads(payload)["choices"][0].get("delta", {})
-            except Exception:  # noqa: BLE001
-                continue
-            piece = delta.get("content") or ""
-            if not piece:
-                continue
-            # thinking 블록 토큰 스트림 제거
-            if "<think>" in piece:
-                in_think = True
-                piece = piece.split("<think>")[0]
-            if in_think:
-                if "</think>" in piece:
-                    in_think = False
-                    piece = piece.split("</think>")[-1]
-                else:
-                    continue
-            buf += piece
-            while True:
-                m = _SENT_END.search(buf)
-                if not m:
-                    break
-                sent, buf = buf[:m.start() + 1].strip(), buf[m.end():]
-                if sent:
-                    yielded = True
-                    yield sent
-        if buf.strip():
-            yielded = True
-            yield buf.strip()
+        # 스트리밍이 한 글자도 못 냈으면(HTTP 에러·thinking 누출 등 모든 경우) **반드시**
+        # 비스트리밍 chat() 로 폴백 — 이 경로는 system+history 포함해도 작동 검증됨.
         if not yielded:
             # 스트리밍이 빈 응답(thinking 누출 등) → 비스트리밍 chat() 폴백(content 보장).
             log.info("스트리밍 빈 응답 → 비스트리밍 폴백")

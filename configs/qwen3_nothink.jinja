@@ -4,7 +4,7 @@
     해결: 어시스턴트 턴을 '<think>\n\n</think>\n\n' 로 프리필 = Qwen 공식 비-thinking 신호 →
     모델이 바로 답변 생성 → content 채워짐. 사용:  llama-server --jinja --chat-template-file 이파일 -#}
 {%- for message in messages -%}
-{{- '<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n' -}}
+{{- '<|im_start|>' + message['role'] + '\n' + (message['content'] or '') + '<|im_end|>' + '\n' -}}
 {%- endfor -%}
 {%- if add_generation_prompt -%}
 {{- '<|im_start|>assistant\n<think>\n\n</think>\n\n' -}}
