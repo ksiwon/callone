@@ -96,7 +96,8 @@ export default function CallScreen() {
       onReply: (text, latency) => {
         historyRef.current.push({ role: "assistant", content: text }); persist();
         setStatus("통화 중");
-        setLogLines((l) => [...l, `${id}: ${text}  (${latency.toFixed(0)}ms)`]);
+        const lat = typeof latency === "number" ? `  (${latency.toFixed(0)}ms)` : "";
+        setLogLines((l) => [...l, `${id}: ${text}${lat}`]);
       },
       onUser: (text) => {
         if (text.trim()) { historyRef.current.push({ role: "user", content: text }); persist();
