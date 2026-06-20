@@ -22,7 +22,11 @@ export HF_HOME="${HF_HOME:-$CALLONE_HOME/hf_cache}"
 export CALLONE_TIER="${CALLONE_TIER:-server_gpu}"
 export CALLONE_TTS_MODEL="${CALLONE_TTS_MODEL:-$CALLONE_HOME/models/qwen3_tts}"
 SPK="${SPK:-sis}"
-LLM_REPO="HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive"
+# LLM: EXAONE-3.5-7.8B abliterated(LG 한국어 특화 + 무검열). 한국어 자연스러움↑, 4090(24GB)도 가뿐.
+#   env 로 교체 가능. (구 Qwen3.5: LLM_REPO=HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive LLM_GLOB='*Q4_K_M*' LLM_DIR=$CALLONE_HOME/models/llm_A)
+LLM_REPO="${LLM_REPO:-AetherArchitectural/EXAONE-3.5-7.8B-Instruct-abliterated-GGUF-ARM-Imatrix-Community}"
+LLM_GLOB="${LLM_GLOB:-*Q6_K*.gguf}"
+LLM_DIR="${LLM_DIR:-$CALLONE_HOME/models/llm_exaone}"
 TTS_REPO="Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 LBIN="$CALLONE_HOME/llama.cpp/build/bin/llama-server"
 NOTHINK_TMPL="$PWD/configs/qwen3_nothink.jinja"   # Qwen3.5 thinking 강제 OFF 템플릿(빈 think 프리필)
@@ -99,11 +103,13 @@ if [ "$DL_OK" != "1" ]; then
 fi
 
 # ── 3. 모델 (받아둔 거 있으면 스킵) ────────────────────────────────────────
-GGUF="$(ls "$CALLONE_HOME"/models/llm_A/*Q4_K_M*.gguf 2>/dev/null | head -1 || true)"
+GGUF="$(ls "$LLM_DIR"/$LLM_GLOB 2>/dev/null | head -1 || true)"
 if [ -z "$GGUF" ]; then
-  echo "[3/5] LLM GGUF 다운로드(5.3GB)..."
-  huggingface-cli download "$LLM_REPO" --include "*Q4_K_M*.gguf" --local-dir "$CALLONE_HOME/models/llm_A"
-  GGUF="$(ls "$CALLONE_HOME"/models/llm_A/*Q4_K_M*.gguf 2>/dev/null | head -1)"
+  echo "[3/5] LLM GGUF 다운로드 ($LLM_REPO $LLM_GLOB)..."
+  huggingface-cli download "$LLM_REPO" --include "$LLM_GLOB" --local-dir "$LLM_DIR" \
+    || "$CALLONE_HOME/callone/.venv-serve/bin/python" -c "from huggingface_hub import snapshot_download as d; d('$LLM_REPO', local_dir='$LLM_DIR', allow_patterns=['$LLM_GLOB'])" \
+    || .venv-serve/bin/python -c "from huggingface_hub import snapshot_download as d; d('$LLM_REPO', local_dir='$LLM_DIR', allow_patterns=['$LLM_GLOB'])"
+  GGUF="$(ls "$LLM_DIR"/$LLM_GLOB 2>/dev/null | head -1)"
 else echo "[3/5] LLM GGUF 있음 → 스킵 ($GGUF)"; fi
 if [ ! -f "$CALLONE_HOME/models/qwen3_tts/config.json" ]; then
   echo "[3/5] TTS 모델 다운로드(4.5GB)..."
@@ -125,9 +131,14 @@ _start_verify() {   # 0=정상 / 2=CUDA에러 / 1=기타실패
   # Qwen3.5 thinking 강제 OFF: 모델 임베디드 템플릿이 <think> 강제주입 → enable_thinking:false/
   #   --reasoning-budget 0 무시되는 llama.cpp 버그(#20182) → content 빔. 우리 no-think 템플릿(빈 think
   #   프리필)으로 교체하면 모델이 바로 답변 → content 참. 템플릿 없으면 --reasoning-budget 0 로 폴백.
-  TMPL_ARG="--jinja --reasoning-budget 0"
-  [ -f "$NOTHINK_TMPL" ] && TMPL_ARG="--jinja --chat-template-file $NOTHINK_TMPL"
-  echo "    LLM 템플릿: $TMPL_ARG"
+  # 기본: 모델 임베디드 템플릿(EXAONE 등은 자체 ChatML 형식). Qwen3.5 만 thinking 버그(#20182)로
+  #   no-think 템플릿 필요 → GGUF 이름이 Qwen3 일 때만 적용(EXAONE 에 적용하면 형식 깨짐).
+  TMPL_ARG="--jinja"
+  case "$(basename "$GGUF")" in
+    *[Qq]wen3*) [ -f "$NOTHINK_TMPL" ] && TMPL_ARG="--jinja --chat-template-file $NOTHINK_TMPL" \
+                  || TMPL_ARG="--jinja --reasoning-budget 0" ;;
+  esac
+  echo "    LLM 템플릿: $TMPL_ARG  (GGUF=$(basename "$GGUF"))"
   nohup "$LBIN" -m "$GGUF" --host 127.0.0.1 --port "$PORT" \
     -c 8192 -n 512 --n-gpu-layers 99 $TMPL_ARG > "$CALLONE_HOME/llama.log" 2>&1 &
   for _ in $(seq 1 90); do

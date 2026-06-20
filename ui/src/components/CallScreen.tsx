@@ -182,6 +182,8 @@ export default function CallScreen() {
     node.buffer = buf; node.connect(ctx.destination);
     const startAt = ctx.currentTime + 0.08;
     node.start(startAt);
+    // 진단: 프레임수 대비 실효 fps(낮으면 Ditto 가 프레임을 적게 보낸 것 = 버벅임 원인)
+    console.log(`[A/V] frames=${frames.length} dur=${dur.toFixed(2)}s → ${(frames.length / Math.max(dur, 0.01)).toFixed(1)}fps (목표 25)`);
     // 프레임: rAF 로 경과시간에 맞는 프레임을 골라 <img>.src 직접 갱신(setState 안 함 → 부드러움).
     if (frames.length) {
       setHasVideo(true);
