@@ -43,6 +43,38 @@ pip install librosa opencv-python-headless imageio imageio-ffmpeg scikit-image t
 # Ditto repo 자체 requirements 가 있으면 추가(저자 의도 — 버전 충돌나면 위 핀 유지).
 [ -f "$DITTO_REPO/requirements.txt" ] && pip install -r "$DITTO_REPO/requirements.txt" || true
 
+# 자가치유: Ditto repo 의 모든 import 를 스캔 → venv 에 없는 모듈 전부 자동 설치(연쇄 누락 한방 해결).
+echo "=== [3.5] Ditto import 스캔 → 누락 모듈 자동 설치 ==="
+( cd "$DITTO_REPO" && python - <<'PY'
+import ast, os, importlib.util, subprocess, sys
+PIPMAP = {'cv2':'opencv-python-headless','PIL':'pillow','skimage':'scikit-image',
+          'sklearn':'scikit-learn','yaml':'pyyaml'}
+mods = set()
+for root, _, files in os.walk('.'):
+    if '/.git' in root or '/.pyxbld' in root:
+        continue
+    for f in files:
+        if not f.endswith('.py'):
+            continue
+        try:
+            t = ast.parse(open(os.path.join(root, f), encoding='utf-8', errors='ignore').read())
+        except Exception:
+            continue
+        for n in ast.walk(t):
+            if isinstance(n, ast.Import):
+                for a in n.names:
+                    mods.add(a.name.split('.')[0])
+            elif isinstance(n, ast.ImportFrom):
+                if n.module and n.level == 0:
+                    mods.add(n.module.split('.')[0])
+missing = [m for m in sorted(mods) if importlib.util.find_spec(m) is None]
+pips = sorted({PIPMAP.get(m, m) for m in missing})
+print("누락:", missing, "→ 설치:", pips)
+for p in pips:
+    subprocess.run([sys.executable, '-m', 'pip', 'install', p])
+PY
+) || echo "[warn] import 스캔 생략(계속)"
+
 # env 고정 — DittoModel 이 이걸로 SDK 로드.
 DATA_ROOT="$DITTO_REPO/checkpoints/ditto_pytorch/models"
 # cfg pkl 은 하위 폴더(ditto_cfg/)에 있음 → 재귀 검색(hubert_cfg_pytorch 우선).
