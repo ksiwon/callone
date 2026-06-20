@@ -94,8 +94,16 @@ def _pick_llm(speaker: str, serve_cfg: dict):
 def _pick_tts(speaker: str, serve_cfg: dict):
     tts_cfg = (serve_cfg or {}).get("tts", {})
     backend = tts_cfg.get("backend", "qwen3-tts")
+    # 0a) CosyVoice3(별 프로세스 :8092, 제로샷 클론 안정성↑ — 실측: 음색 튐 없음). backend=cosyvoice3.
+    if backend == "cosyvoice3":
+        try:
+            from .tts_cosyvoice import CosyVoiceTTS
+
+            return CosyVoiceTTS(speaker, tts_cfg)
+        except Exception as e:  # noqa: BLE001
+            log.warning("CosyVoice3 불가(%s) — Qwen3-TTS 폴백", e)
     # 0) Qwen3-TTS(서버 GPU, 감정 instruct 통합) — 결정서 §2. backend=qwen3-tts 일 때만.
-    if backend == "qwen3-tts":
+    if backend in ("qwen3-tts", "cosyvoice3"):
         try:
             from .tts_qwen import QwenTTS
 

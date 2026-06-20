@@ -45,7 +45,10 @@ llm:
   # 더 길게(40~) 가능. RAG on 이면 매 턴 시스템이 바뀌어 캐시 깨지니 과하게 키우지 말 것.
   max_history: 24
 tts:
-  backend: qwen3-tts           # §2: Qwen3-TTS 1.7B(감정 instruct 통합). 미설치 시 piper/kokoro 폴백
+  # cosyvoice3 = 제로샷 클론 음색 안정(실측: Qwen3-TTS 는 턴마다 음색 튐 → CosyVoice3-0.5B 채택).
+  # 별 프로세스(:8092, conda env) — setup_cosyvoice_gpu.sh. 서버 다운이면 qwen3-tts 자동 폴백.
+  backend: cosyvoice3          # cosyvoice3 | qwen3-tts | piper | kokoro
+  cosyvoice_url: "http://127.0.0.1:8092"
   stream: true
   first_chunk_target_ms: 500   # 실측(A100): chunk_size=15 → 워밍업 후 첫청크 ~0.5s
   # ⚠️ 첫음성 지연의 최대 단일 병목. A100 A/B(2026-06-20): cs 25→776ms·20→637·15→501·10→366ms.
