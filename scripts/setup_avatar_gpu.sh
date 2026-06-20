@@ -83,25 +83,29 @@ for p in pips:
 PY
 ) || echo "[warn] import 스캔 생략(계속)"
 
-# TensorRT/cuda-python 버전 고정(중요): 스캔이 최신 TRT(11.x)를 깔면 Elice 드라이버(535=CUDA12.2)엔
-# 너무 최신이라 'CUDA error 35(insufficient driver)'. 프리빌트 Ampere 엔진도 TRT 8.6 빌드라 8.6.1 로 맞춤.
-# cuda-python 은 옛 API('from cuda import cuda') 필요 → <12.9.
-pip uninstall -y tensorrt tensorrt-libs tensorrt-bindings tensorrt_cu12 tensorrt_cu12_libs tensorrt_cu12_bindings >/dev/null 2>&1 || true
-# tensorrt 메타패키지는 빌드 중 내부에서 pip 호출하다 격리env 서 깨짐 → libs/bindings 직접 설치 후
-# 메타는 --no-build-isolation 으로(이미 만족된 의존성 재호출 안 함).
-pip install --upgrade pip >/dev/null
-pip install tensorrt-libs==8.6.1 tensorrt-bindings==8.6.1 "cuda-python<12.9" \
-  nvidia-cudnn-cu12==8.9.7.29 --extra-index-url https://pypi.nvidia.com   # TRT8.6 은 cuDNN8 필요(토치는 cuDNN9)
-pip install tensorrt==8.6.1 --no-build-isolation --extra-index-url https://pypi.nvidia.com || true  # 메타 실패해도 모듈 있으면 OK
-
-# env 고정 — DittoModel 이 이걸로 SDK 로드.
-# ⚠️ 프리빌트 TRT 엔진(ditto_trt_Ampere_Plus)은 **Ampere(A100, sm_80/86) 전용** — Ada(RTX4090, sm_89)
-#    등 다른 아키텍처에선 deserialize 실패. 그래서 **GPU compute capability 가 Ampere 일 때만 TRT**,
-#    아니면 PyTorch 폴백(어디서나 동작, RTF~1.6). 4090 서 TRT 원하면 ditto_onnx 에서 재빌드 필요.
+# ── GPU 아키텍처 분기(중요) ───────────────────────────────────────────────
+# 프리빌트 TRT 엔진(ditto_trt_Ampere_Plus)은 **Ampere(A100, cc 8.0/8.6) 전용**. Ada(4090, 8.9)·Hopper
+# 에선 안 됨 → 그쪽은 **PyTorch 추론**. 두 경로의 cuDNN 요구가 달라 설치를 분기한다:
+#   - Ampere(TRT): TRT 8.6.1 + cuDNN8. (cuDNN8 이 torch 의 cuDNN9 를 치우지만, 추론은 TRT 라 무관.)
+#   - 비-Ampere(PyTorch): **cuDNN8 절대 설치 금지**(torch cuDNN9 보존해야 PyTorch 추론 동작).
+# cuda-python 은 양쪽 공통으로 옛 API('from cuda import cuda') 필요 → <12.9.
 CK="$DITTO_REPO/checkpoints"
 CC="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')"
 USE_TRT=0
-case "$CC" in 8.0|8.6) USE_TRT=1 ;; esac   # Ampere(A100/A6000 등). Ada(8.9)·Hopper(9.0) 는 폴백
+case "$CC" in 8.0|8.6) USE_TRT=1 ;; esac
+pip install --upgrade pip >/dev/null
+pip install "cuda-python<12.9" --extra-index-url https://pypi.nvidia.com   # 공통(import 호환)
+if [ "$USE_TRT" = 1 ]; then
+  # tensorrt 메타패키지는 격리빌드서 깨짐 → libs/bindings 직접 + 메타 --no-build-isolation.
+  pip uninstall -y tensorrt tensorrt-libs tensorrt-bindings tensorrt_cu12 tensorrt_cu12_libs tensorrt_cu12_bindings >/dev/null 2>&1 || true
+  pip install tensorrt-libs==8.6.1 tensorrt-bindings==8.6.1 nvidia-cudnn-cu12==8.9.7.29 --extra-index-url https://pypi.nvidia.com
+  pip install tensorrt==8.6.1 --no-build-isolation --extra-index-url https://pypi.nvidia.com || true
+  echo "  [GPU] Ampere(cc=$CC) → TensorRT 8.6.1 + cuDNN8 (프리빌트 엔진, RTF<1)"
+else
+  echo "  [GPU] 비-Ampere(cc=${CC:-?}) → PyTorch 추론. torch cuDNN9 유지(cuDNN8 미설치). TRT 속도 원하면 onnx 재빌드."
+fi
+
+# env 고정 — DittoModel 이 이걸로 SDK 로드(위 USE_TRT 재사용).
 if [ "$USE_TRT" = 1 ] && [ -d "$CK/ditto_trt_Ampere_Plus" ] && [ -f "$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl" ]; then
   DATA_ROOT="$CK/ditto_trt_Ampere_Plus"                       # 프리빌트 TRT 엔진(Ampere)
   CFG_PKL="$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl"      # TRT 온라인(스트리밍) cfg
