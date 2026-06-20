@@ -154,6 +154,9 @@ def create_app():
         try:
             while True:
                 msg = await ws.receive()
+                # 클라 연결 끊김 → disconnect 메시지 받으면 즉시 종료(이후 receive() 호출 시 RuntimeError 방지).
+                if msg.get("type") == "websocket.disconnect":
+                    break
                 if "text" in msg and msg["text"]:
                     ctrl = json.loads(msg["text"])
                     if ctrl.get("type") in ("stop", "interrupt", "end"):
