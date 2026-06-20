@@ -179,6 +179,12 @@ export default function CallScreen() {
       catch { setLogLines((l) => [...l, "(불러오기 실패: JSON 아님)"]); }
     });
   }
+  function clearHistory() {
+    // 이전 대화 기억 전부 삭제(브라우저 보관분). 통화 시작 시 백엔드엔 빈 history 가 가므로 깨끗이 새 대화.
+    historyRef.current = [];
+    try { localStorage.removeItem(HKEY); } catch { /* noop */ }
+    setLogLines((l) => [...l, "(기억 리셋됨 — 새 대화로 시작)"]);  // 상태변경 → 재렌더(턴수 0 반영)
+  }
 
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
@@ -204,6 +210,7 @@ export default function CallScreen() {
         <Controls>
           <Btn onClick={startCall} disabled={!voiceFile}>📞 통화 시작</Btn>
           {turns > 0 && <Btn onClick={exportHistory}>대화 내보내기</Btn>}
+          {turns > 0 && <Btn danger onClick={clearHistory}>🗑 기억 리셋</Btn>}
           <Btn danger onClick={() => nav("/")}>취소</Btn>
         </Controls>
       </Screen>
