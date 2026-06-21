@@ -121,6 +121,7 @@ fi
 # 비-Ampere: 이 GPU용 TRT 엔진을 일반 ONNX 에서 빌드(프리빌트 대체, repo scripts/cvt_onnx_to_trt.py). ~수십분, 1회.
 if [ "$BUILD_TRT" = 1 ] && [ ! -d "$CK/ditto_trt_custom" ]; then
   if [ -d "$CK/ditto_onnx" ] && [ -f "$DITTO_REPO/scripts/cvt_onnx_to_trt.py" ]; then
+    pip install onnx >/dev/null 2>&1 || true   # cvt 가 onnx 파서 사용(import 스캔서 빠질 수 있어 보강)
     echo "=== [GPU] custom TRT 엔진 빌드 중 (cvt_onnx_to_trt, 수십분) ... ==="
     ( cd "$DITTO_REPO" && python scripts/cvt_onnx_to_trt.py --onnx_dir "$CK/ditto_onnx" --trt_dir "$CK/ditto_trt_custom" ) \
       && echo "  ✅ custom TRT 엔진 완료: $CK/ditto_trt_custom" \
@@ -132,8 +133,8 @@ fi
 
 # env 고정 — DATA_ROOT 우선순위: Ampere 프리빌트 > custom(비-Ampere) > PyTorch(폴백). 모두 TRT online cfg.
 TRT_CFG="$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl"
-if [ "$BUILD_TRT" != 1 ] && [ -d "$CK/ditto_trt_Ampere_Plus" ] && [ -f "$TRT_CFG" ]; then
-  DATA_ROOT="$CK/ditto_trt_Ampere_Plus"; CFG_PKL="$TRT_CFG"
+if [ "$USE_TRT" = 1 ] && [ "$BUILD_TRT" != 1 ] && [ -d "$CK/ditto_trt_Ampere_Plus" ] && [ -f "$TRT_CFG" ]; then
+  DATA_ROOT="$CK/ditto_trt_Ampere_Plus"; CFG_PKL="$TRT_CFG"   # Ampere(USE_TRT=1, 빌드 안 함) 만
   BACKEND_LABEL="Ditto TensorRT(Ampere 프리빌트, cc=$CC) — 움직임 O"
 elif [ -d "$CK/ditto_trt_custom" ] && [ -f "$TRT_CFG" ]; then
   DATA_ROOT="$CK/ditto_trt_custom"; CFG_PKL="$TRT_CFG"
