@@ -51,7 +51,9 @@ bash scripts/setup_avatar_gpu.sh
   - 시스템 libs(GL/X11/오디오: `libGLESv2.so.2` 등) `sudo apt`
   - Ditto import 스캔 → 누락 파이썬 모듈 일괄 설치(filetype·cython·onnxruntime·cuda-python 등)
   - **TensorRT 8.6.1 고정**(최신 TRT는 드라이버535에 `CUDA error 35` + 프리빌트 엔진 비호환) + **cuDNN8**(TRT8.6용, 토치 cuDNN9와 soname 달라 공존)
-  - **DITTO_* env**(`~/.bashrc`): TRT(Ampere+trt_online) 우선, 없으면 PyTorch 폴백
+  - **DITTO_* env**(`~/.bashrc`): TRT(Ampere+trt_online) 우선, 없으면 PyTorch
+  - ⚠️ **Ampere(A100/3090 등)면 얼굴이 움직임(TRT). 4090(Ada)은 PyTorch가 0프레임(미동작)** → 아래 "알아둘 것" 참고,
+    4090에선 `AVATAR_BACKEND=static`(음성+정지사진)으로
 
 ## 4) 전체 기동
 ```bash
@@ -92,9 +94,17 @@ bash scripts/run_all.sh          # 다 떠 있으면 health만, 죽은 것만 �
 - **첫 턴 영상은 콜드(~30s, TRT 첫 추론)** — 이후 턴은 RTF<1로 빠름. 정상.
 - **A/V 동기**: 음성이 영상 생성을 기다렸다 같이 재생(입싱크 우선). 음성전용(사진 미업로드)이면 지연 없음.
 - **프라이버시**: 음성·사진·대화는 프론트(브라우저) 소유. 서버는 인메모리(/dev/shm)만, 통화 끝나면 폐기. 디스크/로그에 본문 0.
-- **A100 vs 4090(자동 처리)**: 프리빌트 TRT 엔진(`ditto_trt_Ampere_Plus`)은 **Ampere(A100, cc 8.0/8.6) 전용**.
-  `setup_avatar_gpu.sh` 가 GPU compute capability 를 감지해 **Ampere면 TRT(RTF<1), 그 외(4090 Ada cc 8.9 등)는
-  PyTorch 자동 폴백**(어디서나 동작, RTF~1.6). 4090 에서 TRT 속도를 원하면 `ditto_onnx` 에서 엔진 재빌드.
-  LLM(EXAONE)·TTS(CosyVoice3)·ASR 은 두 GPU 동일.
+- **⚠️ 움직이는 얼굴(Ditto)은 Ampere GPU에서만 검증됨**:
+  - **A100/H100/3090/A5000/A6000 등 Ampere(cc 8.0/8.6)** → 프리빌트 TRT 엔진(`ditto_trt_Ampere_Plus`)으로
+    **얼굴이 실제로 움직임**(립싱크·표정, RTF<1). ✅ 검증된 경로.
+  - **RTX 4090/L40 등 Ada(cc 8.9)** → 프리빌트 TRT 비호환 → Ditto **PyTorch 폴백인데 현재 0프레임으로 안 움직임**
+    (실측: 오디오 청크 크기가 PyTorch 모델 기대값과 불일치 → 모션 생성 실패. 게다가 음성까지 막음).
+    **→ 4090에선 `AVATAR_BACKEND=static` 으로 띄워라**(음성 + 정지사진은 정상 동작 확인됨):
+    ```bash
+    echo 'export AVATAR_BACKEND=static' >> ~/.bashrc && source ~/.bashrc
+    bash scripts/run_all.sh
+    ```
+    움직이는 얼굴이 필요하면 **Ampere GPU**를 써라(위). 4090 PyTorch 애니메이션은 Ditto 온라인 청크 정합 작업이 추가로 필요.
+  - **음성·한국어·목소리복제·정지사진은 A100/4090 둘 다 동일하게 동작**(LLM EXAONE·TTS CosyVoice3·ASR 동일).
 - **로그**: `~/serve.log` `~/avatar.log` `~/cosyvoice.log` `~/llama.log` (본문 없음 — 길이·지연만)
 - **단계별 시간**: `grep -E "ASR 완료|LLM 완료|아바타" ~/serve.log`

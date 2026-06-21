@@ -26,7 +26,8 @@ PORT=8090 bash scripts/bootstrap_gpu.sh        # venv·llama-server·모델 (FRE
 bash scripts/setup_avatar_gpu.sh               # .venv-avatar + Ditto repo+checkpoints(PyTorch) + 드라이버호환 torch
 ```
 ✅ 끝에 `torch ... cuda ... OK` + DITTO_DATA_ROOT/CFG_PKL 경로 출력.
-> TensorRT 아닌 **PyTorch 백엔드**(버전지옥 회피). 실시간 부족하면 그때 TRT(A100=Ampere 프리빌트 / 4090=Ada 재빌드).
+> ⚠️ **얼굴 움직임은 Ampere(A100/3090) TRT에서만 검증됨.** 4090(Ada)은 Ditto PyTorch가 0프레임으로 미동작(실측) →
+> 4090에선 `AVATAR_BACKEND=static`(음성+정지사진). 움직이는 얼굴은 Ampere GPU 사용.
 
 ## 3. avatar-server 기동 (별 터미널, 계속 켜둠)
 ```bash

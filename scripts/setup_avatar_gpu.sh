@@ -111,7 +111,9 @@ if [ "$USE_TRT" = 1 ]; then
   pip install tensorrt==8.6.1 --no-build-isolation --extra-index-url https://pypi.nvidia.com || true
   echo "  [GPU] Ampere(cc=$CC) → TensorRT 8.6.1 + cuDNN8 (프리빌트 엔진, RTF<1)"
 else
-  echo "  [GPU] 비-Ampere(cc=${CC:-?}) → PyTorch 추론. torch cuDNN9 유지(cuDNN8 미설치). TRT 속도 원하면 onnx 재빌드."
+  echo "  [GPU] 비-Ampere(cc=${CC:-?}) → PyTorch 경로. torch cuDNN9 유지(cuDNN8 미설치)."
+  echo "  ⚠️ 4090(Ada) 등 비-Ampere에서 Ditto PyTorch 는 현재 0프레임(애니메이션 안 됨, 음성도 막음) — 실측."
+  echo "     → 'export AVATAR_BACKEND=static' 으로 음성+정지사진 사용 권장. 움직이는 얼굴은 Ampere GPU."
 fi
 
 # env 고정 — DittoModel 이 이걸로 SDK 로드(위 USE_TRT 재사용).
@@ -125,7 +127,7 @@ else
   [ -z "$DATA_ROOT" ] && DATA_ROOT="$CK/ditto_pytorch"
   CFG_PKL="$(find "$CK" -name '*cfg*pytorch*.pkl' 2>/dev/null | grep -i hubert | head -1)"
   [ -z "$CFG_PKL" ] && CFG_PKL="$(find "$CK" -name '*pytorch*.pkl' 2>/dev/null | head -1)"
-  echo "  Ditto 백엔드: PyTorch(cc=${CC:-?}, RTF~1.6) — 프리빌트 TRT 는 Ampere 전용이라 폴백"
+  echo "  Ditto 백엔드: PyTorch(cc=${CC:-?}) — ⚠️ 비-Ampere 애니메이션 미동작(0프레임). AVATAR_BACKEND=static 권장"
 fi
 sed -i '/export DITTO_REPO=/d;/export DITTO_DATA_ROOT=/d;/export DITTO_CFG_PKL=/d' ~/.bashrc
 { echo "export DITTO_REPO=$DITTO_REPO"
@@ -138,7 +140,7 @@ python - <<'PY' || echo "⚠️ torch GPU 실패 — 드라이버 호환 CUDA �
 import torch; assert torch.cuda.is_available(); print("torch", torch.__version__, "cuda", torch.version.cuda, "OK")
 PY
 
-if [ "$USE_TRT" = 1 ]; then BACKEND_LABEL="Ditto TensorRT(Ampere, RTF<1)"; else BACKEND_LABEL="Ditto PyTorch(폴백, RTF~1.6)"; fi
+if [ "$USE_TRT" = 1 ]; then BACKEND_LABEL="Ditto TensorRT(Ampere, 움직임 O)"; else BACKEND_LABEL="Ditto PyTorch(비-Ampere — 애니 미동작, AVATAR_BACKEND=static 권장)"; fi
 cat <<EOF
 
 === avatar-server 준비 완료($BACKEND_LABEL) ===
