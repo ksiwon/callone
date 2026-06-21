@@ -288,13 +288,17 @@ export default function CallScreen() {
     console.log(`[A/V] frames=${frames.length} dur=${dur.toFixed(2)}s → ${(frames.length / Math.max(dur, 0.01)).toFixed(1)}fps`);
     if (bitmaps.length) {
       setHasVideo(true);
+      // 입이 대사보다 살짝 늦는 보정: 영상을 AV_LEAD_S 만큼 **앞당겨** 재생(오디오 시각 el 에 리드를
+      // 더해 그만큼 미래 프레임 표시). Ditto 스트리밍 초반 뉴트럴 프레임 + 모델 룩어헤드의 고유 지연을
+      // 상쇄. 입이 여전히 늦으면 값↑, 너무 앞서면 값↓ (실측 튜닝 노브, 초 단위).
+      const AV_LEAD_S = 0.12;
       drawBitmap(bitmaps[0]);
       const startPerf = performance.now() + (startAt - ctx.currentTime) * 1000;
       let last = -1;
       const tick = () => {
         const el = (performance.now() - startPerf) / 1000;   // 오디오 경과(초)
         if (el >= 0) {
-          const idx = Math.min(bitmaps.length - 1, Math.max(0, Math.floor(el / dur * bitmaps.length)));
+          const idx = Math.min(bitmaps.length - 1, Math.max(0, Math.floor((el + AV_LEAD_S) / dur * bitmaps.length)));
           if (idx !== last) { drawBitmap(bitmaps[idx]); last = idx; }
         }
         if (el < dur) { rafRef.current = requestAnimationFrame(tick); }
