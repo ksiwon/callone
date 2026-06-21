@@ -318,18 +318,18 @@ class Orchestrator:
             except Exception:  # noqa: BLE001
                 pass
 
-    def set_context(self, persona: str | None = None, situation: str | None = None):
-        """통화 페르소나/상황 주입 — 매 통화 시작 시 호출.
-
-        persona:   이 사람이 누구인지(말투/성격/관계). 비면 학습된 페르소나 유지.
-        situation: 지금 어떤 상황에서 통화 중인지(배경지식/맥락).
-        LLM 백엔드가 set_context 를 지원하면 그대로 전달.
-        """
+    def set_context(self, persona: str | None = None, situation: str | None = None, **card):
+        """통화 페르소나/상황 주입 — 매 통화 시작 시 호출. 캐릭터 카드 필드(personality/background/
+        first_message/example_dialogue/user_persona)는 **card 로 전달. LLM 백엔드가 받으면 그대로,
+        구 백엔드(persona/situation 만)는 TypeError 폴백."""
         fn = getattr(self.llm, "set_context", None)
-        if callable(fn):
-            fn(persona=persona, situation=situation)
-        else:
+        if not callable(fn):
             log.warning("LLM 백엔드가 set_context 미지원 — 페르소나/상황 무시")
+            return
+        try:
+            fn(persona=persona, situation=situation, **card)
+        except TypeError:
+            fn(persona=persona, situation=situation)
 
     def reset_history(self):
         """새 통화 시작 — 대화 이력 초기화."""
@@ -337,17 +337,23 @@ class Orchestrator:
 
     # ----- 프라이버시 세션(인메모리, 디스크·로그 영속 0) ------------------
     def init_session(self, *, ref_audio=None, ref_sr: int = 24000, ref_text=None,
-                     portrait=None, persona=None, situation=None, history=None):
+                     portrait=None, persona=None, situation=None, history=None,
+                     personality=None, background=None, first_message=None,
+                     example_dialogue=None, user_persona=None):
         """통화 시작 — 프론트가 보낸 개인데이터로 세션 구성(전부 **인메모리**).
 
         ref_audio: 화자 음성 ndarray(목소리 복제) / portrait: 사진 bytes(얼굴) /
+        캐릭터 카드(personality/background/first_message/example_dialogue/user_persona) = 상황극 페르소나.
         history: 이전 대화(클라가 보관·복원). 디스크 파일 안 만들고 로그에 본문 안 남긴다.
         통화 끝나면 cleanup_session() 으로 즉시 폐기."""
         self.reset_history()
         if history:
             self.history = list(history)
-        if (persona and persona.strip()) or (situation and situation.strip()):
-            self.set_context(persona=persona or None, situation=situation or None)
+        _card = {"personality": personality, "background": background,
+                 "first_message": first_message, "example_dialogue": example_dialogue,
+                 "user_persona": user_persona}
+        if (persona and persona.strip()) or (situation and situation.strip()) or any(v and str(v).strip() for v in _card.values()):
+            self.set_context(persona=persona or None, situation=situation or None, **_card)
         # 목소리(인메모리 ref) — TTS 백엔드가 지원하면.
         if ref_audio is not None:
             fn = getattr(self.tts, "set_reference", None)

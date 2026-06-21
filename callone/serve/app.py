@@ -63,7 +63,12 @@ def _parse_session_init(ctrl: dict) -> dict:
     import io
 
     kw: dict = {"persona": ctrl.get("persona"), "situation": ctrl.get("situation"),
-                "ref_text": ctrl.get("ref_text"), "history": ctrl.get("history")}
+                "ref_text": ctrl.get("ref_text"), "history": ctrl.get("history"),
+                # 캐릭터 카드 추가 필드(전부 선택)
+                "personality": ctrl.get("personality"), "background": ctrl.get("background"),
+                "first_message": ctrl.get("first_message"),
+                "example_dialogue": ctrl.get("example_dialogue"),
+                "user_persona": ctrl.get("user_persona")}
     if ctrl.get("ref_audio_b64"):
         import soundfile as sf
 

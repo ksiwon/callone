@@ -48,8 +48,13 @@ class LlamaPersonaLLM:
         self.max_history = int((rag_cfg or {}).get("max_history", max_history))
         self.timeout = timeout
         self.persona = load_persona(speaker)
-        self._persona_override: str | None = None   # 통화 시 주입(이 사람은 누구)
-        self._situation: str | None = None          # 통화 시 주입(지금 상황)
+        self._persona_override: str | None = None   # 이름·관계(이 사람은 누구)
+        self._situation: str | None = None          # 지금 상황(scenario)
+        self._personality: str | None = None        # 성격·말투
+        self._background: str | None = None          # 배경
+        self._first_message: str | None = None       # 첫 마디(말투 예시)
+        self._example_dialogue: str | None = None    # 예시 대화(말투 충실도)
+        self._user_persona: str | None = None        # 상대(나)는 누구 = 관계
         self._emotion_labels = False                 # True 면 응답 앞에 [emotion:..] 출력 지시
         self._rag = None
         if use_rag:
@@ -76,10 +81,18 @@ class LlamaPersonaLLM:
                 f"llama-server 응답 없음({self.base_url}). "
                 f"먼저 llama-server 를 띄워라(scripts/run_llama_server.md): {e}") from e
 
-    # ----- 컨텍스트 주입(통화 페르소나/상황) ------------------------------
-    def set_context(self, persona: str | None = None, situation: str | None = None):
+    # ----- 컨텍스트 주입(캐릭터 카드 — 상황극 페르소나) -------------------
+    def set_context(self, persona: str | None = None, situation: str | None = None, *,
+                    personality: str | None = None, background: str | None = None,
+                    first_message: str | None = None, example_dialogue: str | None = None,
+                    user_persona: str | None = None):
         self._persona_override = persona
         self._situation = situation
+        self._personality = personality
+        self._background = background
+        self._first_message = first_message
+        self._example_dialogue = example_dialogue
+        self._user_persona = user_persona
 
     def set_emotion_labeling(self, on: bool = True):
         """감정 라벨 출력 on/off. orchestrator 가 TTS 감정 활성 시 켠다.
@@ -89,13 +102,26 @@ class LlamaPersonaLLM:
 
     # ----- 메시지 조립 ----------------------------------------------------
     def _system(self, user_text: str) -> str:
-        # persona_override 있으면 학습 페르소나 대체(통화 시 "이 사람은 누구").
-        sys = (self._persona_override.strip()
-               if (self._persona_override and self._persona_override.strip())
-               else self.persona)
-        if self._situation and self._situation.strip():
-            sys += ("\n\n[지금 통화 상황 — 이 맥락에서 대화한다]\n"
-                    + self._situation.strip())
+        # ── 캐릭터 카드(상황극) ── 정체/성격/배경 → 관계 → 상황 → 말투예시 순으로 조립.
+        def _s(v):
+            return v.strip() if (v and v.strip()) else ""
+        who = _s(self._persona_override) or self.persona
+        block = ["[너의 정체 — 전화기 너머의 진짜 사람. 이 사람으로 끝까지 연기하고 절대 AI/모델이라 밝히지 마라]",
+                 who]
+        if _s(self._personality):
+            block.append("성격·말투: " + _s(self._personality))
+        if _s(self._background):
+            block.append("배경: " + _s(self._background))
+        sys = "\n".join(block)
+        if _s(self._user_persona):
+            sys += ("\n\n[상대 — 지금 너와 통화하는 사람]\n상대는 너에게 '" + _s(self._user_persona)
+                    + "'. 이 관계에 맞는 호칭·태도로 대하라.")
+        if _s(self._situation):
+            sys += "\n\n[지금 상황 — 이 맥락 속에서 대화한다]\n" + _s(self._situation)
+        ex = [e for e in (_s(self._first_message), _s(self._example_dialogue)) if e]
+        if ex:
+            sys += ("\n\n[너의 말투 예시 — 이런 톤·길이로 말한다(말투만 따라하고 내용은 상황에 맞춰)]\n"
+                    + "\n".join(ex))
         if self._rag:
             try:
                 ctx = self._rag.context(user_text, k=3)
@@ -133,6 +159,16 @@ class LlamaPersonaLLM:
         sys += "\n\n/no_think"
         return sys
 
+    def _post_history(self) -> str:
+        """이력 '뒤'에 다시 박는 핵심 규칙 — 연구·캐릭터카드 스펙상 시스템(앞)보다 훨씬 강하게 지켜진다.
+        길어진 대화에서 말투/길이 붕괴 방지. 캐릭터 자체는 위 시스템에, 여기엔 '행동 규칙'만 짧게."""
+        who = (self._persona_override or "").strip()
+        rule = ("[지금 답하기 직전 — 반드시 지켜라] "
+                + (f"너는 '{who}'다. " if who else "")
+                + "위 설정·말투를 유지한다. 반말/존댓말 섞지 말고 일관되게, 1~2문장으로 아주 짧게, "
+                "순 한국어로, 입으로 소리내는 말만(이모지·괄호설명·한자 금지). 이미 한 질문은 반복 금지.")
+        return rule
+
     def _messages(self, user_text: str, history: list[dict] | None) -> list[dict]:
         msgs = [{"role": "system", "content": self._system(user_text)}]
         # history 새니타이즈: 클라가 import 한 이력에 None/빈/비문자열 content 나 알 수 없는
@@ -143,6 +179,8 @@ class LlamaPersonaLLM:
             content = (m or {}).get("content")
             if role in ("user", "assistant") and isinstance(content, str) and content.strip():
                 msgs.append({"role": role, "content": content})
+        # post-history 규칙(이력 뒤·현재 발화 앞 system) — 약화되기 쉬운 말투/길이 규칙을 강하게 재주입.
+        msgs.append({"role": "system", "content": self._post_history()})
         msgs.append({"role": "user", "content": user_text})
         return msgs
 

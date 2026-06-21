@@ -86,8 +86,14 @@ export default function CallScreen() {
   // 클라가 소유하는 개인데이터(서버 영속 0)
   const [voiceFile, setVoiceFile] = useState<File | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [persona, setPersona] = useState("");
-  const [situation, setSituation] = useState("");
+  // 캐릭터 카드(character card) 필드 — 실제 캐릭터 챗 사이트(Character.AI/SillyTavern) 표준.
+  const [persona, setPersona] = useState("");          // 이름·관계 (description/who)
+  const [personality, setPersonality] = useState("");  // 성격·말투 (personality)
+  const [background, setBackground] = useState("");     // 배경
+  const [situation, setSituation] = useState("");       // 지금 상황 (scenario)
+  const [firstMessage, setFirstMessage] = useState(""); // 첫 마디 (greeting)
+  const [exampleDialogue, setExampleDialogue] = useState(""); // 예시 말투 (example messages)
+  const [userPersona, setUserPersona] = useState("");   // 나는 누구 (관계 기준)
   const historyRef = useRef<Turn[]>([]);
 
   const sockRef = useRef<CallSocket | null>(null);
@@ -145,9 +151,15 @@ export default function CallScreen() {
     });
     sockRef.current = sock;
 
-    // 개인데이터 전송(클라 소유 → 서버 인메모리만)
+    // 개인데이터 전송(클라 소유 → 서버 인메모리만). 캐릭터 카드 필드 포함.
     const init: SessionInit = {
-      persona: persona || undefined, situation: situation || undefined,
+      persona: persona || undefined,
+      personality: personality || undefined,
+      background: background || undefined,
+      situation: situation || undefined,
+      first_message: firstMessage || undefined,
+      example_dialogue: exampleDialogue || undefined,
+      user_persona: userPersona || undefined,
       history: historyRef.current.length ? historyRef.current : undefined,
     };
     if (voiceFile) init.ref_audio_b64 = await fileToBase64(voiceFile);
@@ -277,10 +289,21 @@ export default function CallScreen() {
           <input type="file" accept="audio/*" onChange={(e) => setVoiceFile(e.target.files?.[0] ?? null)} />
           <label>증명사진 (얼굴, jpg/png) — 선택</label>
           <input type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
-          <label>이 사람은 누구? (페르소나) — 선택</label>
-          <input type="text" value={persona} onChange={(e) => setPersona(e.target.value)} placeholder="예: 어릴 적 친구 승호" />
+          <label>이름·관계 (이 사람은 누구?)</label>
+          <input type="text" value={persona} onChange={(e) => setPersona(e.target.value)} placeholder="예: 소꿉친구 나은" />
+          <label>성격·말투 — 선택</label>
+          <input type="text" value={personality} onChange={(e) => setPersonality(e.target.value)} placeholder="예: 밝고 장난기 많음. 반말로 짧고 편하게." />
+          <label>배경 — 선택</label>
+          <input type="text" value={background} onChange={(e) => setBackground(e.target.value)} placeholder="예: 초등학교 때부터 단짝, 지금도 같은 동네 살아." />
           <label>지금 상황 — 선택</label>
-          <input type="text" value={situation} onChange={(e) => setSituation(e.target.value)} placeholder="예: 오랜만에 전화" />
+          <input type="text" value={situation} onChange={(e) => setSituation(e.target.value)} placeholder="예: 오랜만에 갑자기 전화함." />
+          <label>나는 누구? (상대 기준) — 선택</label>
+          <input type="text" value={userPersona} onChange={(e) => setUserPersona(e.target.value)} placeholder="예: 나은의 소꿉친구" />
+          <label>첫 마디 — 선택</label>
+          <input type="text" value={firstMessage} onChange={(e) => setFirstMessage(e.target.value)} placeholder="예: 야 오랜만이다! 살아있었네?" />
+          <label>예시 말투 (이렇게 말함) — 선택</label>
+          <textarea rows={3} value={exampleDialogue} onChange={(e) => setExampleDialogue(e.target.value)}
+            placeholder={"예:\n나: 뭐해?\n나은: 그냥 침대에서 뒹굴뒹굴~ 넌 밥은 먹었어?"} />
           <label>이전 대화 불러오기 (이어하기) — 선택  {turns > 0 ? `· 저장된 ${turns}턴 있음` : ""}</label>
           <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importHistory(e.target.files[0])} />
         </Setup>

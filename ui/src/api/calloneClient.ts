@@ -66,9 +66,15 @@ export interface SessionInit {
   ref_audio_b64?: string;   // 화자 음성 파일 bytes(base64) — 목소리 복제
   ref_text?: string;
   portrait_b64?: string;    // 사진 파일 bytes(base64) — 얼굴
-  persona?: string;
-  situation?: string;
-  history?: Turn[];         // 이전 대화 복원(이어하기)
+  // 캐릭터 카드(character card) 필드 — 상황극 페르소나
+  persona?: string;          // 이름·관계 (이 사람은 누구)
+  personality?: string;      // 성격·말투
+  background?: string;       // 배경
+  situation?: string;        // 지금 상황 (scenario)
+  first_message?: string;    // 첫 마디 (greeting)
+  example_dialogue?: string; // 예시 말투
+  user_persona?: string;     // 나는 누구(상대 기준 = 관계)
+  history?: Turn[];          // 이전 대화 복원(이어하기)
 }
 
 // 실시간 통화 WebSocket. 마이크 오디오(Float32) 업스트림, 음성 청크 다운스트림.
