@@ -64,7 +64,7 @@ echo "==> [4/6] 의존성(빌드지옥 제외) + fastapi 서버"
 grep -vE 'tensorrt|onnxruntime-gpu|deepspeed|openai-whisper' requirements.txt > requirements_clean.txt
 pip install -r requirements_clean.txt
 pip install onnxruntime
-pip install soundfile huggingface_hub faster-whisper noisereduce pydub
+pip install soundfile huggingface_hub hf_transfer faster-whisper noisereduce pydub  # hf_transfer: RunPod HF_HUB_ENABLE_HF_TRANSFER=1 대비
 # CosyVoice frontend.py 가 'import whisper'(openai-whisper) 필요 — requirements_clean 에서 제외됐으므로 별도 설치.
 # ⚠️ openai-whisper 가 torch 를 끌어내리므로(2.6→2.3) **반드시 torch 고정 전에** 깐다.
 pip install openai-whisper==20231117 --no-build-isolation || pip install openai-whisper --no-build-isolation || pip install openai-whisper
