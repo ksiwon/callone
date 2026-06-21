@@ -24,12 +24,12 @@ asr:
   beam_size: 1                        # greedy → 실시간 지연 최소
 llm:
   # 백엔드 선택 (callone_stack_decision.md §3: llama.cpp 채택):
-  #   llama = llama-server(HTTP, OpenAI 호환) Qwen3.5-9B(서버) / 4B(노트북) + LoRA
+  #   llama = llama-server(HTTP, OpenAI 호환) EXAONE-3.5-7.8B(서버) / Qwen3.5-4B(노트북) + LoRA
   #   ov    = OpenVINO base Qwen3-4B(Arc, 변환 가능한 모델만)
   #   auto  = llama 먼저 시도(서버 떠있으면), 없으면 ov → 폴백
   backend: auto                # auto | llama | ov | vllm
   base_url: "http://127.0.0.1:8090"   # llama-server 주소(Elice 가 8080 점유 → 8090 기본. bootstrap 이 PORT 로 동기)
-  config: llm_phone            # llm_server(서버 Qwen3.5-9B) | llm_phone(노트북 4B)
+  config: llm_phone            # llm_server(서버 EXAONE-3.5-7.8B) | llm_phone(노트북 Qwen3.5-4B)
   enable_thinking: false       # §1-3: 대화용 thinking 비활성(응답 지연 억제)
   # 기억 회상: extract_memories.py 로 memories.json 만든 뒤 true 권장(의미검색=삼천포 없음).
   use_rag: false               # 사실 추출 후 true 로

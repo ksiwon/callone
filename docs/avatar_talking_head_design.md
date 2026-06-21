@@ -104,11 +104,11 @@ def _pick_avatar(cfg) -> AvatarBackend:  # _pick_tts 와 동형 폴백 체인
 
 | 점유 | 모델 | VRAM(대략) |
 |---|---|---|
-| LLM | Qwen3.5-9B Q4_K_M(llama-server) | ~6 GB |
-| TTS | Qwen3-TTS 1.7B bf16 | ~3 GB |
+| LLM | EXAONE-3.5-7.8B Q6_K(llama-server) | ~6.5 GB |
+| TTS | CosyVoice3-0.5B(별 conda env) | ~1.5 GB |
 | ASR | faster-whisper turbo | ~1.5 GB |
 | **Avatar** | **Ditto / MuseTalk** | **~3~6 GB(실측 필요)** |
-| 합계 | | **~14~17 GB → 24GB 안에 들어가나 빠듯** |
+| 합계 | | **~12.5~15.5 GB → 24GB 안에 여유** |
 
 - 별 GPU 프로세스 = **GPU 시분할** → LLM/TTS가 약간 느려질 수 있음. 첫음성 지연에 avatar FFD(<400ms) 가산.
 - VRAM 부족 시: avatar를 256² 저해상/낮은 fps로, 또는 MuseTalk 경량, 최후 StaticImage.

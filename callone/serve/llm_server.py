@@ -1,8 +1,8 @@
 """S6 LLM 추론 서버 (§16).
 
 티어 자동 선택(common/hardware):
-  - server_gpu(H100) → vLLM(Gemma 4 12B + LoRA)  [llm_server.yaml]
-  - laptop_cpu/phone → Ollama/llama.cpp(Gemma 4 E4B + LoRA)  [llm_phone.yaml]
+  - server_gpu(H100) → llama.cpp/vLLM(EXAONE-3.5-7.8B + LoRA)  [llm_server.yaml]
+  - laptop_cpu/phone → Ollama/llama.cpp(Qwen3.5-4B + LoRA)  [llm_phone.yaml]
 페르소나 프롬프트 + RAG + 메모리 결합. 미설치 시 규칙 기반 폴백 응답(지연 측정용).
 """
 from __future__ import annotations

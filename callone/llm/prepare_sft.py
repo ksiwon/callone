@@ -1,6 +1,6 @@
 """S5 SFT 데이터 준비 (§15.2).
 
-대화셋 train.jsonl(7.6) → Gemma 4 채팅 템플릿 형식으로 변환.
+대화셋 train.jsonl(7.6) → 학습용 채팅 메시지 형식으로 변환(실제 토크나이즈는 train_lora 에서).
 assistant=본인, 상대 role name, TAU(선택). "모르면 모른다" 예시 보강(§15.3).
 
 출력: data/datasets/{spk}/dialogue/sft.jsonl (학습 직행).
@@ -26,15 +26,15 @@ _DONTKNOW = [
 ]
 
 
-def to_chat_text(messages: list[dict], template: str = "qwen3.5") -> dict:
+def to_chat_text(messages: list[dict], template: str = "exaone") -> dict:
     """채팅 메시지 → 학습용 dict. 실제 토크나이즈는 train_lora 에서 apply_chat_template."""
     return {"messages": messages}
 
 
 def run(cfg: dict, speakers: list[str]) -> None:
     add_dk = cfg.get("use_tau", True)  # 캘리브레이션도 함께
-    # 결정서 §1: Qwen3.5 채택 → 기본 템플릿 qwen3.5(ChatML).
-    template = cfg.get("chat_template", "qwen3.5")
+    # 템플릿은 config 의 chat_template(서버=exaone, 폰=qwen). 실제 적용은 train_lora 의 tokenizer.
+    template = cfg.get("chat_template", "exaone")
     for spk in speakers:
         src = data_dir() / "datasets" / spk / "dialogue" / "train.jsonl"
         if not src.exists():

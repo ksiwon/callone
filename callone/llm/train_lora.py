@@ -53,8 +53,8 @@ def train(cfg: dict, spk: str) -> None:
     tcfg = cfg.get("train", {})
     lcfg = cfg.get("lora", {})
 
-    # ⚠️ Qwen3.5 = MoE. Unsloth(2026) 권장: bf16 LoRA(load_in_4bit=false).
-    #    bitsandbytes 의 MoE 4bit 임포트 버그 회피. VRAM 빠듯할 때만 4bit.
+    # bf16 LoRA 권장(load_in_4bit=false). EXAONE-3.5-7.8B 는 dense 라 24GB 에 bf16 LoRA 가뿐.
+    # VRAM 빠듯할 때만 4bit(QLoRA).
     use_4bit = bool(cfg.get("load_in_4bit", cfg.get("method") == "qlora"))
     tok = AutoTokenizer.from_pretrained(base)
     if use_4bit:
@@ -76,7 +76,7 @@ def train(cfg: dict, spk: str) -> None:
             pass
 
     def _reshape(messages):
-        """Qwen 등 채팅 템플릿이 받화자 B이는 형태로 정규화.
+        """채팅 템플릿이 받는 user/assistant 교대 형태로 정규화.
         - name(관계)은 user content 에 녹임
         - 같은 역할 연속은 병합(엄격한 user/assistant 교대 보장)
         - 선두 assistant(앞에 user 없음) 제거, 끝의 user 제거(assistant 로 끝나게)
@@ -115,14 +115,14 @@ def train(cfg: dict, spk: str) -> None:
         return
     data = recs
 
-    # 결정서 §1-3: Qwen3.5 는 thinking 비활성으로 학습(대화용, 지연 억제).
+    # 대화용: thinking 비활성으로 학습(지연 억제, §1-3). 템플릿이 미지원이면 fmt 에서 무시.
     enable_thinking = bool(cfg.get("enable_thinking", False))
 
     def fmt(ex):
         try:
             text = tok.apply_chat_template(ex["messages"], tokenize=False,
                                            enable_thinking=enable_thinking)
-        except TypeError:   # 템플릿이 enable_thinking 미지원(Gemma 등) → 무시
+        except TypeError:   # 템플릿이 enable_thinking 미지원(EXAONE/Gemma 등) → 무시
             text = tok.apply_chat_template(ex["messages"], tokenize=False)
         return {"text": text}
 
@@ -162,11 +162,11 @@ def train(cfg: dict, spk: str) -> None:
 
 def _print_recipe(cfg: dict, spk: str) -> None:
     log.info(
-        "[Qwen3.5 QLoRA 레시피 spk=%s] (callone_stack_decision §1)\n"
+        "[화자 LoRA 레시피 spk=%s] (base=EXAONE 기본, callone_stack_decision §1)\n"
         "  base=%s method=%s\n"
         "  lora=%s train=%s\n"
         "  데이터: data/datasets/%s/dialogue/sft.jsonl\n"
-        "  → A100 에서 Unsloth/trl QLoRA + apply_chat_template(enable_thinking=False).\n"
+        "  → A100 에서 trl LoRA + apply_chat_template(enable_thinking=False).\n"
         "  → 학습 후 GGUF q4_k_m 변환(scripts/make_gguf.py) → llama-server.\n"
         "  ※ 학습 없이 빠른 통화는 bootstrap_gpu.sh 의 EXAONE GGUF 직접 서빙(제로샷).",
         spk, cfg.get("base_model"), cfg.get("method"),
@@ -175,7 +175,7 @@ def _print_recipe(cfg: dict, spk: str) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="S5 Qwen3.5 LoRA 파인튜닝")
+    ap = argparse.ArgumentParser(description="S5 화자 페르소나 LoRA 파인튜닝(EXAONE 기본)")
     ap.add_argument("--config", default="llm_server", help="llm_server | llm_phone")
     ap.add_argument("--speakers", nargs="+", default=["A"])
     args = ap.parse_args()

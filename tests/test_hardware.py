@@ -1,16 +1,16 @@
 """기기 티어 자동 선택 검증 (§3, §17.2).
 
-2026-06 웹 검증 결과를 코드에 반영:
-  - GPU 서버 → Gemma 4 12B
-  - 노트북(무GPU) → Gemma 4 E4B (12B는 CPU에서 너무 느림)
-  - 폰 → E4B/E2B
+티어 → config 이름 매핑 검증(모델은 config 가 보유):
+  - GPU 서버 → llm_server (EXAONE-3.5-7.8B)
+  - 노트북(무GPU) → llm_phone (Qwen3.5-4B, 서버 7.8B는 CPU에서 너무 느림)
+  - 폰 → llm_phone
 """
 from callone.common.hardware import tier_defaults, detect_tier
 
 
 def test_tiers_map_to_right_llm():
-    assert tier_defaults("server_gpu")["llm_config"] == "llm_server"   # 12B
-    assert tier_defaults("laptop_cpu")["llm_config"] == "llm_phone"    # E4B
+    assert tier_defaults("server_gpu")["llm_config"] == "llm_server"   # EXAONE-3.5-7.8B
+    assert tier_defaults("laptop_cpu")["llm_config"] == "llm_phone"    # Qwen3.5-4B
     assert tier_defaults("phone")["llm_config"] == "llm_phone"
 
 

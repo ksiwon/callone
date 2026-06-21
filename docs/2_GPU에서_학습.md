@@ -38,18 +38,18 @@ callone-tts-train  --speakers A B      # 서버 고품질 (Qwen3-TTS / VoxCPM2)
 callone-tts-phone  --speakers A B      # 폰용 경량 (Piper / MeloTTS)
 
 # (3) 말투·성격 복제
-callone-llm-train  --config llm_server --speakers A B   # Gemma 4 12B
-callone-llm-train  --config llm_phone  --speakers A B   # 폰용 Gemma 4 E4B
+callone-llm-train  --config llm_server --speakers A B   # EXAONE-3.5-7.8B (한국어 특화)
+callone-llm-train  --config llm_phone  --speakers A B   # 폰용 Qwen3.5-4B (경량·온디바이스)
 ```
 
 ## 결과물 (학습된 모델)
 - `models/asr_dialect/` — 방언 적응 ASR
 - `models/tts_server/{A,B}/`, `models/tts_phone/{A,B}/` — 목소리
-- `models/llm_12b/{A,B}/`, `models/llm_e4b/{A,B}/` — 말투
+- `models/llm_server/{A,B}/`, `models/llm_phone/{A,B}/` — 말투
 
 이 `models/` 폴더를 노트북/폰으로 가져가면 통화 가능 → [3번](3_노트북에서_통화.md) · [4번](4_휴대폰에서_통화.md).
 
 ## 통화까지 서버에서 바로
 ```bash
-callone-serve        # GPU 서버에서 실시간 통화 서버 (Gemma 12B + Qwen3-TTS)
+callone-serve        # GPU 서버에서 실시간 통화 서버 (EXAONE + CosyVoice3)
 ```

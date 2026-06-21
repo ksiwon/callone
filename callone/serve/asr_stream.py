@@ -3,7 +3,7 @@
 기본 모델 = **Whisper large-v3-turbo** (정확도 대비 가장 빠름; 실시간 적합).
 방언 적응본(models/asr_dialect)이 있으면 그걸 우선 사용.
 실시간이라 beam_size=1, greedy, VAD 필터로 지연 최소화.
-디바이스 자동(GPU 없으면 cpu+int8). Gemma 4 오디오 직접 입력(준-E2E)도 허용.
+디바이스 자동(GPU 없으면 cpu+int8).
 
 ⚠️ §3 검증 의무: turbo 가 현 시점 최선인지 착수 시 웹 재확인(Voxtral/Canary 등).
 """
