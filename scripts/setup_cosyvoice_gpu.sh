@@ -90,6 +90,9 @@ CRUN pip uninstall -y flash-attn flash_attn 2>/dev/null || true
 #   2.6(cu124)이 'libcusparseLt.so.0 없음' 등으로 죽는다 → deps 포함 force-reinstall 로 cu124
 #   nvidia-* lib(cublas 12.4·cudnn 9.1·cusparselt 0.6.2·triton 3.2 …) 셋을 통째로 정합.
 CRUN pip install --force-reinstall torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+# ⚠️ setuptools 81+ 는 pkg_resources 를 제거 → CosyVoice(hyperpyyaml 경유)가 'No module pkg_resources'
+#   로 죽는다. 위 설치들이 81+로 올렸을 수 있으니 **맨 마지막에 <81 로 재핀**(이게 last word).
+CRUN pip install "setuptools<81"
 CRUN python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, '· cuda_avail', torch.cuda.is_available())" \
   || { echo "❌ torch 로드 실패 — 위 ImportError 의 CUDA lib 확인."; exit 1; }
 # ★의존성 완전성 게이트★ — cosyvoice env 에서 AutoModel import 되면 서버 기동 보장. 안 되면 여기서 멈춰 원인 표시.
