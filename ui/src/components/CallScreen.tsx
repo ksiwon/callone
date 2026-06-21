@@ -224,7 +224,7 @@ export default function CallScreen() {
       if (!ctx || ctx.sampleRate !== sr) { try { ctx?.close(); } catch { /* noop */ } ctx = new AudioContext({ sampleRate: sr }); previewCtxRef.current = ctx; }
       if (ctx.state === "suspended") await ctx.resume();
       const buf = ctx.createBuffer(1, audio.length, sr);
-      buf.copyToChannel(audio, 0);
+      buf.getChannelData(0).set(audio);   // copyToChannel 대신 set — 버퍼 타입(ArrayBufferLike) 무관, 타입세이프
       const node = ctx.createBufferSource(); node.buffer = buf; node.connect(ctx.destination); node.start();
       setPreviewMsg("▶ 재생 중 — 본인 목소리 같으면 다음으로.");
     } catch (e: any) {
