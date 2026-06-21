@@ -21,6 +21,13 @@ fi
 
 echo "=== llama.cpp CUDA 빌드 → $DEST ==="
 if [ ! -d "$DEST/.git" ]; then
+  # $DEST 가 .git 없이 이미 존재하면(프리빌트 tgz 를 $DEST/build/bin 에 풀어둔 경우 등)
+  # git clone 이 'already exists and is not empty' 로 거부된다 → 비우고 새로 받는다.
+  # (거기 있던 프리빌트는 glibc 불일치로 어차피 못 쓰므로 버려도 안전.)
+  if [ -d "$DEST" ] && [ -n "$(ls -A "$DEST" 2>/dev/null)" ]; then
+    echo "   기존 비-git $DEST 발견(프리빌트 잔재) → 정리 후 clone"
+    rm -rf "$DEST"
+  fi
   git clone https://github.com/ggml-org/llama.cpp "$DEST"
 fi
 cd "$DEST"
