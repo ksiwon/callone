@@ -118,6 +118,57 @@ def create_app():
         sp = _speakers_dir() / sid / "sample_utterances.json"
         return read_json(sp) if sp.exists() else []
 
+    _preview = {}   # 프로세스 캐시: CosyVoiceTTS 핸들(재프로브 비용 절감)
+
+    @app.post("/api/voice/preview")
+    async def voice_preview(payload: dict):
+        """목소리 미리듣기 — 업로드한 참조로 짧은 문장을 복제 합성(통화 전 유사도 확인).
+
+        body: {ref_audio_b64, ref_text?, text?}
+        resp: {ref_text, sr, audio_b64(float32 PCM)}
+        프라이버시: 참조는 인메모리만(디스크/로그 0). 합성 직후 cleanup_reference 로 폐기.
+        """
+        import asyncio
+        import base64
+        import io
+
+        b64 = payload.get("ref_audio_b64")
+        if not b64:
+            return JSONResponse({"error": "ref_audio_b64 필요(음성 먼저 업로드)"}, status_code=400)
+        text = (payload.get("text")
+                or "안녕하세요. 제 목소리가 이렇게 복제됐어요. 오랜만이에요, 잘 지냈죠?").strip()
+        import soundfile as sf
+
+        raw = base64.b64decode(b64)
+        a, asr = sf.read(io.BytesIO(raw), dtype="float32")
+        if getattr(a, "ndim", 1) > 1:
+            a = a.mean(axis=1)
+
+        def _work():
+            from .tts_cosyvoice import CosyVoiceTTS
+            tts = _preview.get("tts")
+            if tts is None:
+                tts = CosyVoiceTTS("preview", load_config("serve").get("tts", {}))
+                _preview["tts"] = tts
+            try:
+                tts.set_reference(a, int(asr), payload.get("ref_text") or None)
+                audio, sr = tts.synth(text)
+                return tts.ref_text, audio, sr
+            finally:
+                tts.cleanup_reference()   # 인메모리 개인데이터 즉시 폐기
+
+        loop = asyncio.get_running_loop()
+        try:
+            ref_text, audio, sr = await loop.run_in_executor(None, _work)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"미리듣기 실패(cosyvoice-server 확인): {e}"}, status_code=503)
+        if audio is None or len(audio) == 0:
+            return JSONResponse(
+                {"error": "합성 결과 없음 — cosyvoice-server(:8092) 상태 확인"}, status_code=503)
+        return {"ref_text": ref_text, "sr": int(sr),
+                "audio_b64": base64.b64encode(audio.astype(np.float32).tobytes()).decode()}
+
     @app.websocket("/ws/call/{speaker_id}")
     async def call(ws: WebSocket, speaker_id: str):
         await ws.accept()

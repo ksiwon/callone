@@ -58,6 +58,26 @@ export async function getSamples(id: string): Promise<any[]> {
   return r.ok ? r.json() : [];
 }
 
+// 목소리 미리듣기 — 업로드한 참조로 복제 목소리를 통화 전에 확인(1순위 유사도).
+// 서버는 인메모리만 쓰고 합성 직후 폐기. ref_text 는 자동 전사 결과(수정 가능) 반환.
+export async function previewVoice(
+  refAudioB64: string,
+  opts?: { text?: string; refText?: string },
+): Promise<{ refText: string; audio: Float32Array; sr: number }> {
+  const r = await fetch(`${BASE}/api/voice/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ref_audio_b64: refAudioB64, text: opts?.text, ref_text: opts?.refText }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({ error: r.statusText }));
+    throw new Error(e.error || "미리듣기 실패");
+  }
+  const j = await r.json();
+  const bytes = Uint8Array.from(atob(j.audio_b64), (c) => c.charCodeAt(0));
+  return { refText: j.ref_text, audio: new Float32Array(bytes.buffer), sr: j.sr };
+}
+
 // 대화 한 턴(클라가 소유·export/import. 서버엔 안 남음).
 export interface Turn { role: "user" | "assistant"; content: string }
 

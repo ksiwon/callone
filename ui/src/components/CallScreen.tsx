@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { useParams, useNavigate } from "react-router-dom";
-import { CallSocket, fileToBase64, type Turn, type SessionInit } from "../api/calloneClient";
+import { CallSocket, fileToBase64, previewVoice, type Turn, type SessionInit } from "../api/calloneClient";
 
 const Screen = styled.div`
   min-height: 100vh; display: flex; flex-direction: column; align-items: center;
@@ -62,13 +62,43 @@ const Btn = styled.button<{ danger?: boolean }>`
   background: ${(p) => (p.danger ? p.theme.colors.danger : p.theme.colors.surface)};
 `;
 const Setup = styled.div`
-  width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 12px;
+  width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 12px;
   color: ${(p) => p.theme.colors.text};
   & label { font-size: 13px; color: ${(p) => p.theme.colors.sub}; }
   & input[type="text"], & textarea {
     width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #2a3a52;
     background: #0c1422; color: #fff; font-size: 14px;
   }
+`;
+/* ── 단계형 셋업(stepper): 상단 진행 점 + 단계별 본문 + 이전/다음 ── */
+const Steps = styled.div`display: flex; gap: 8px; width: 100%; max-width: 460px; margin-bottom: 4px;`;
+const StepDot = styled.div<{ on: boolean; done: boolean }>`
+  flex: 1; height: 6px; border-radius: 3px;
+  background: ${(p) => (p.done ? p.theme.colors.accent : p.on ? p.theme.colors.primary : p.theme.colors.border)};
+`;
+const StepTitle = styled.div`font-size: 18px; font-weight: 700; color: ${(p) => p.theme.colors.text};`;
+const StepHint = styled.div`font-size: 13px; color: ${(p) => p.theme.colors.sub}; margin: 2px 0 8px;`;
+const Preview = styled.button`
+  align-self: flex-start; padding: 9px 14px; border-radius: 18px; border: none; cursor: pointer;
+  background: ${(p) => p.theme.colors.accent}; color: #06202b; font-weight: 700; font-size: 13px;
+  &:disabled { opacity: 0.5; cursor: default; }
+`;
+const Note = styled.div<{ err?: boolean }>`
+  font-size: 13px; color: ${(p) => (p.err ? p.theme.colors.danger : p.theme.colors.sub)};
+`;
+const Thumb = styled.img`
+  width: 120px; height: 120px; object-fit: cover; border-radius: 12px;
+  border: 1px solid ${(p) => p.theme.colors.border};
+`;
+const Fold = styled.details`
+  border: 1px solid ${(p) => p.theme.colors.border}; border-radius: 10px; padding: 8px 12px;
+  & > summary { cursor: pointer; font-size: 13px; color: ${(p) => p.theme.colors.sub}; }
+  & > div { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+`;
+const Ghost = styled.button`
+  padding: 12px 18px; border-radius: 24px; cursor: pointer; font-size: 14px;
+  background: transparent; color: ${(p) => p.theme.colors.sub}; border: 1px solid ${(p) => p.theme.colors.border};
+  &:disabled { opacity: 0.4; cursor: default; }
 `;
 
 export default function CallScreen() {
@@ -95,6 +125,14 @@ export default function CallScreen() {
   const [exampleDialogue, setExampleDialogue] = useState(""); // 예시 말투 (example messages)
   const [userPersona, setUserPersona] = useState("");   // 나는 누구 (관계 기준)
   const historyRef = useRef<Turn[]>([]);
+
+  // 단계형 셋업 상태
+  const [step, setStep] = useState(1);                  // 1 목소리 · 2 얼굴 · 3 캐릭터 · 4 시작
+  const [refText, setRefText] = useState("");           // 참조 음성 전사(자동→수정 가능, 유사도↑)
+  const [previewing, setPreviewing] = useState(false);
+  const [previewMsg, setPreviewMsg] = useState("");     // 미리듣기 안내/에러
+  const [photoUrl, setPhotoUrl] = useState("");         // 사진 미리보기 objectURL
+  const previewCtxRef = useRef<AudioContext | null>(null);  // 미리듣기 재생 전용
 
   const sockRef = useRef<CallSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);     // 마이크 캡처(16kHz)
@@ -153,6 +191,7 @@ export default function CallScreen() {
 
     // 개인데이터 전송(클라 소유 → 서버 인메모리만). 캐릭터 카드 필드 포함.
     const init: SessionInit = {
+      ref_text: refText.trim() || undefined,   // 미리듣기에서 확정/수정한 전사 → 유사도↑
       persona: persona || undefined,
       personality: personality || undefined,
       background: background || undefined,
@@ -165,6 +204,32 @@ export default function CallScreen() {
     if (voiceFile) init.ref_audio_b64 = await fileToBase64(voiceFile);
     if (photoFile) init.portrait_b64 = await fileToBase64(photoFile);
     sock.sessionInit(init);
+  }
+
+  // 사진 선택 → 미리보기 objectURL(이전 것 해제).
+  function pickPhoto(f: File | null) {
+    setPhotoFile(f);
+    setPhotoUrl((old) => { if (old) URL.revokeObjectURL(old); return f ? URL.createObjectURL(f) : ""; });
+  }
+
+  // 복제 목소리 미리듣기 — 업로드 음성으로 짧은 문장 합성해 재생(통화 전 유사도 확인).
+  async function runPreview() {
+    if (!voiceFile) return;
+    setPreviewing(true); setPreviewMsg("합성 중… (첫 회는 전사 포함 ~수 초)");
+    try {
+      const b64 = await fileToBase64(voiceFile);
+      const { refText: rt, audio, sr } = await previewVoice(b64, { refText: refText.trim() || undefined });
+      if (rt && !refText.trim()) setRefText(rt);   // 자동 전사 결과 채움(비어있을 때만)
+      let ctx = previewCtxRef.current;
+      if (!ctx || ctx.sampleRate !== sr) { try { ctx?.close(); } catch { /* noop */ } ctx = new AudioContext({ sampleRate: sr }); previewCtxRef.current = ctx; }
+      if (ctx.state === "suspended") await ctx.resume();
+      const buf = ctx.createBuffer(1, audio.length, sr);
+      buf.copyToChannel(audio, 0);
+      const node = ctx.createBufferSource(); node.buffer = buf; node.connect(ctx.destination); node.start();
+      setPreviewMsg("▶ 재생 중 — 본인 목소리 같으면 다음으로.");
+    } catch (e: any) {
+      setPreviewMsg(`⚠️ ${e?.message || "미리듣기 실패"} (cosyvoice-server 확인)`);
+    } finally { setPreviewing(false); }
   }
 
   async function startMic(sock: CallSocket) {
@@ -251,6 +316,8 @@ export default function CallScreen() {
     sockRef.current?.stop();          // 서버가 인메모리 개인데이터 폐기
     if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     try { playCtxRef.current?.close(); } catch { /* noop */ }
+    try { previewCtxRef.current?.close(); } catch { /* noop */ }
+    if (photoUrl) URL.revokeObjectURL(photoUrl);
     playCtxRef.current = null; playheadRef.current = 0;
     nav("/");
   }
@@ -279,39 +346,88 @@ export default function CallScreen() {
   const ss = String(sec % 60).padStart(2, "0");
   const turns = Math.floor(historyRef.current.length / 2);
 
-  // ---- 설정 화면(통화 전) ----
+  // ---- 설정 화면(통화 전): 단계형 — ①목소리 ②얼굴 ③캐릭터 ④시작 ----
   if (!started) {
+    const STEP_META = [
+      ["목소리", "복제할 목소리를 올리고 미리 들어보세요 (필수)"],
+      ["얼굴", "영상통화용 사진 — 없으면 음성통화 (선택)"],
+      ["캐릭터", "누구이고 나와 무슨 사이인지 (선택)"],
+      ["시작", "이전 대화 이어가기 · 통화 시작"],
+    ];
+    const next = () => setStep((s) => Math.min(4, s + 1));
+    const prev = () => setStep((s) => Math.max(1, s - 1));
     return (
       <Screen>
         <Who><Big>{id}</Big><Status>통화 준비 · 개인데이터는 내 브라우저만 보관</Status></Who>
+        <Steps>
+          {STEP_META.map((_, i) => <StepDot key={i} on={step === i + 1} done={step > i + 1} />)}
+        </Steps>
         <Setup>
-          <label>화자 음성 (목소리 복제, 7~10초 깨끗한 wav/mp3)</label>
-          <input type="file" accept="audio/*" onChange={(e) => setVoiceFile(e.target.files?.[0] ?? null)} />
-          <label>증명사진 (얼굴, jpg/png) — 선택</label>
-          <input type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
-          <label>이름·관계 (이 사람은 누구?)</label>
-          <input type="text" value={persona} onChange={(e) => setPersona(e.target.value)} placeholder="예: 소꿉친구 나은" />
-          <label>성격·말투 — 선택</label>
-          <input type="text" value={personality} onChange={(e) => setPersonality(e.target.value)} placeholder="예: 밝고 장난기 많음. 반말로 짧고 편하게." />
-          <label>배경 — 선택</label>
-          <input type="text" value={background} onChange={(e) => setBackground(e.target.value)} placeholder="예: 초등학교 때부터 단짝, 지금도 같은 동네 살아." />
-          <label>지금 상황 — 선택</label>
-          <input type="text" value={situation} onChange={(e) => setSituation(e.target.value)} placeholder="예: 오랜만에 갑자기 전화함." />
-          <label>나는 누구? (상대 기준) — 선택</label>
-          <input type="text" value={userPersona} onChange={(e) => setUserPersona(e.target.value)} placeholder="예: 나은의 소꿉친구" />
-          <label>첫 마디 — 선택</label>
-          <input type="text" value={firstMessage} onChange={(e) => setFirstMessage(e.target.value)} placeholder="예: 야 오랜만이다! 살아있었네?" />
-          <label>예시 말투 (이렇게 말함) — 선택</label>
-          <textarea rows={3} value={exampleDialogue} onChange={(e) => setExampleDialogue(e.target.value)}
-            placeholder={"예:\n나: 뭐해?\n나은: 그냥 침대에서 뒹굴뒹굴~ 넌 밥은 먹었어?"} />
-          <label>이전 대화 불러오기 (이어하기) — 선택  {turns > 0 ? `· 저장된 ${turns}턴 있음` : ""}</label>
-          <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importHistory(e.target.files[0])} />
+          <StepTitle>{step}. {STEP_META[step - 1][0]}</StepTitle>
+          <StepHint>{STEP_META[step - 1][1]}</StepHint>
+
+          {step === 1 && (<>
+            <label>화자 음성 (7~10초, 깨끗한 wav/mp3)</label>
+            <input type="file" accept="audio/*" onChange={(e) => { setVoiceFile(e.target.files?.[0] ?? null); setPreviewMsg(""); }} />
+            {voiceFile && <Preview onClick={runPreview} disabled={previewing}>{previewing ? "합성 중…" : "🔊 복제 목소리 미리듣기"}</Preview>}
+            {previewMsg && <Note err={previewMsg.startsWith("⚠️")}>{previewMsg}</Note>}
+            {voiceFile && (<>
+              <label>참조 음성 내용 (전사 — 정확할수록 유사도↑, 수정 가능)</label>
+              <input type="text" value={refText} onChange={(e) => setRefText(e.target.value)} placeholder="미리듣기를 누르면 자동으로 채워집니다" />
+            </>)}
+          </>)}
+
+          {step === 2 && (<>
+            <label>증명사진 (얼굴, jpg/png)</label>
+            <input type="file" accept="image/*" onChange={(e) => pickPhoto(e.target.files?.[0] ?? null)} />
+            {photoUrl
+              ? <Thumb src={photoUrl} alt="얼굴 미리보기" />
+              : <Note>사진을 올리면 영상통화(움직이는 얼굴), 없으면 음성통화로 진행돼요.</Note>}
+          </>)}
+
+          {step === 3 && (<>
+            <label>이름·관계 (이 사람은 누구?)</label>
+            <input type="text" value={persona} onChange={(e) => setPersona(e.target.value)} placeholder="예: 소꿉친구 나은" />
+            <label>나는 누구? (상대 기준)</label>
+            <input type="text" value={userPersona} onChange={(e) => setUserPersona(e.target.value)} placeholder="예: 나은의 소꿉친구" />
+            <label>성격·말투</label>
+            <input type="text" value={personality} onChange={(e) => setPersonality(e.target.value)} placeholder="예: 밝고 장난기 많음. 반말로 짧고 편하게." />
+            <Fold>
+              <summary>더 자세히 (배경·상황·첫 마디·예시 말투)</summary>
+              <div>
+                <label>배경</label>
+                <input type="text" value={background} onChange={(e) => setBackground(e.target.value)} placeholder="예: 초등학교 때부터 단짝, 지금도 같은 동네 살아." />
+                <label>지금 상황</label>
+                <input type="text" value={situation} onChange={(e) => setSituation(e.target.value)} placeholder="예: 오랜만에 갑자기 전화함." />
+                <label>첫 마디</label>
+                <input type="text" value={firstMessage} onChange={(e) => setFirstMessage(e.target.value)} placeholder="예: 야 오랜만이다! 살아있었네?" />
+                <label>예시 말투 (이렇게 말함)</label>
+                <textarea rows={3} value={exampleDialogue} onChange={(e) => setExampleDialogue(e.target.value)}
+                  placeholder={"예:\n나: 뭐해?\n나은: 그냥 침대에서 뒹굴뒹굴~ 넌 밥은 먹었어?"} />
+              </div>
+            </Fold>
+          </>)}
+
+          {step === 4 && (<>
+            <label>이전 대화 불러오기 (이어하기) {turns > 0 ? `· 저장된 ${turns}턴 있음` : ""}</label>
+            <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importHistory(e.target.files[0])} />
+            <Note>
+              {voiceFile ? "✓ 목소리" : "· 목소리 없음"}{photoFile ? " · ✓ 얼굴" : " · 음성통화"}{persona ? ` · ✓ ${persona}` : ""}
+            </Note>
+            {turns > 0 && (
+              <Controls style={{ justifyContent: "flex-start" }}>
+                <Btn onClick={exportHistory}>대화 내보내기</Btn>
+                <Btn danger onClick={clearHistory}>🗑 기억 리셋</Btn>
+              </Controls>
+            )}
+          </>)}
         </Setup>
+
         <Controls>
-          <Btn onClick={startCall} disabled={!voiceFile}>📞 통화 시작</Btn>
-          {turns > 0 && <Btn onClick={exportHistory}>대화 내보내기</Btn>}
-          {turns > 0 && <Btn danger onClick={clearHistory}>🗑 기억 리셋</Btn>}
-          <Btn danger onClick={() => nav("/")}>취소</Btn>
+          {step > 1 ? <Ghost onClick={prev}>← 이전</Ghost> : <Ghost onClick={() => nav("/")}>취소</Ghost>}
+          {step < 4
+            ? <Btn onClick={next} disabled={step === 1 && !voiceFile}>다음 →</Btn>
+            : <Btn onClick={startCall} disabled={!voiceFile}>📞 통화 시작</Btn>}
         </Controls>
       </Screen>
     );
