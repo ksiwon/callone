@@ -15,10 +15,17 @@ CUDA_INDEX="${CUDA_INDEX:-https://download.pytorch.org/whl/cu124}"
 DITTO_REPO="$CALLONE_HOME/ditto-talkinghead"
 
 echo "=== [0] 시스템 라이브러리(GL/X11/오디오) — Ditto 렌더·cv2 가 요구(libGLESv2.so.2 등) ==="
-sudo apt-get update 2>/dev/null && sudo apt-get install -y \
-  libgl1 libglx-mesa0 libgles2 libegl1 libglvnd0 libglib2.0-0 \
-  libsm6 libxext6 libxrender1 libxi6 libxrandr2 libxfixes3 libgomp1 libsndfile1 ffmpeg \
-  2>/dev/null || echo "[info] apt 생략(권한 없음/이미 있음) — 없으면 Ditto 로드 시 libGLESv2.so.2 등 에러"
+# root 컨테이너(RunPod)는 sudo 없음 → apt-get 직접. 이게 스킵되면 libGLESv2.so.2 누락으로
+# Ditto 가 로드 실패→static 폴백(얼굴 안 움직임). sudo 있으면 sudo, 둘 다 없으면 안내.
+if command -v sudo >/dev/null 2>&1; then APT="sudo apt-get"; elif command -v apt-get >/dev/null 2>&1; then APT="apt-get"; else APT=""; fi
+if [ -n "$APT" ]; then
+  $APT update 2>/dev/null || true
+  $APT install -y libgl1 libglx-mesa0 libgles2 libegl1 libglvnd0 libglib2.0-0 \
+    libsm6 libxext6 libxrender1 libxi6 libxrandr2 libxfixes3 libgomp1 libsndfile1 ffmpeg \
+    || echo "[info] apt 일부 실패 — libGLESv2.so.2 없으면 Ditto 가 static 으로 폴백한다"
+else
+  echo "[info] apt 없음 — GL 라이브러리 수동 설치 필요(없으면 Ditto static 폴백)"
+fi
 
 echo "=== [1] avatar 전용 venv ($VENV) ==="
 python3 -m venv "$VENV"
