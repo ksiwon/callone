@@ -26,10 +26,16 @@ run_server() {
 
 if [ "$1" = "run" ]; then run_server; fi
 
-echo "==> [1/6] 시스템 패키지(sox/ffmpeg)"
-sudo apt-get update && sudo apt-get install -y git git-lfs sox libsox-dev ffmpeg wget build-essential 2>/dev/null || \
-  echo "[info] apt 생략(권한 없음/이미 있음)"
-git lfs install || true
+echo "==> [1/6] 시스템 패키지(sox/ffmpeg/git-lfs)"
+# root(컨테이너)면 sudo 없음 → apt-get 직접. sudo 있으면 sudo. 둘 다 없으면 생략.
+if command -v sudo >/dev/null 2>&1; then APT="sudo apt-get"; elif command -v apt-get >/dev/null 2>&1; then APT="apt-get"; else APT=""; fi
+if [ -n "$APT" ]; then
+  $APT update && $APT install -y git git-lfs sox libsox-dev ffmpeg wget build-essential || \
+    echo "[info] apt 일부 실패 — git-lfs/모델은 huggingface_hub 로 받으므로 보통 무방"
+else
+  echo "[info] apt 없음 — 생략(모델은 huggingface_hub 로 받음)"
+fi
+git lfs install 2>/dev/null || true
 
 echo "==> [2/6] conda + CosyVoice 클론"
 if ! command -v conda >/dev/null 2>&1 && [ ! -d "$HOME/miniconda3" ]; then
@@ -44,8 +50,13 @@ conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 
 cd "$COSY_DIR"; git submodule update --init --recursive
 
 echo "==> [3/6] conda env(cosyvoice, py3.10)"
-conda create -n cosyvoice -y python=3.10 2>/dev/null || true
-conda activate cosyvoice
+# 이미 있으면 스킵. 없으면 conda-forge 명시로 생성(에러를 숨기지 않는다 — 실패 시 원인이 보여야 함).
+if ! conda env list | grep -qE '/cosyvoice$|^cosyvoice[[:space:]]'; then
+  conda create -n cosyvoice -y -c conda-forge python=3.10 \
+    || { echo "❌ conda env 생성 실패 — 위 에러 확인(흔한 원인: 컨테이너 디스크 부족 'df -h /', 네트워크/SSL)."; exit 1; }
+fi
+conda activate cosyvoice \
+  || { echo "❌ cosyvoice env 활성화 실패 — 생성이 안 됐다. 위 conda 에러 확인."; exit 1; }
 pip install --upgrade pip
 pip install "setuptools<81" wheel
 
