@@ -24,13 +24,14 @@ cd ~   # /workspace 있으면 거기(자동감지)
 git clone <리포URL> callone && cd callone
 ```
 
-## 1) 서빙 스택 (llama EXAONE + Qwen3-TTS + .venv-serve)  ~10–20분
+## 1) 서빙 스택 (llama EXAONE + .venv-serve + TTS 폴백)  ~10–20분
 ```bash
 PORT=8090 bash scripts/bootstrap_gpu.sh
 ```
 - `.venv-serve` 생성 + `pip install -e .`
 - llama-server 바이너리(프리빌트 다운, 드라이버 안 맞으면 CUDA12.4 자동 재빌드)
-- **EXAONE GGUF**(Q6_K, AetherArchitectural) + Qwen3-TTS 모델 다운
+- **EXAONE GGUF**(Q6_K, AetherArchitectural) + **Qwen3-TTS 폴백 모델** 다운
+  (1순위 TTS는 다음 단계 **CosyVoice3**; Qwen3-TTS는 CosyVoice 다운 시 자동 폴백용)
 - llama 기동 + GPU 검증. 끝에 `LLM 템플릿: --jinja (GGUF=EXAONE...)` 확인.
 - 검증: `curl -s 127.0.0.1:8090/v1/chat/completions -H "Content-Type: application/json" -d '{"messages":[{"role":"user","content":"안녕"}],"max_tokens":32}'`
 

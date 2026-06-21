@@ -3,7 +3,7 @@
 여기 노트북엔 GPU 모델이 없어 측정 불가 → 이 스크립트를 **박스에서** 돌려
 ASR / LLM / TTS 각 단계가 첫 음성까지 몇 ms 먹는지 숫자로 본다(목소리엔 영향 0).
 
-전제(docs/RUNPOD_RUN.md): llama-server(:8080) + Qwen3-TTS 가중치 + 화자 ref_24k.wav 준비.
+전제(docs/FRESH_SETUP.md · scripts/run_all.sh): llama-server(:8090) + cosyvoice-server(:8092) + 화자 ref 준비.
 
 사용:
   # 텍스트 입력(ASR 건너뜀 — LLM+TTS 만 측정). 가장 간단.

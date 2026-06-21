@@ -94,7 +94,7 @@ scripts/        세팅·실행 스크립트 (bootstrap_gpu, setup_cosyvoice_gpu,
 ui/             React 통화 화면
 docs/           세팅·사용 문서 (FRESH_SETUP 우선)
 tests/          pytest (폴백 경로 검증)
-legacy/         초기 참조 앱(gradio studio 등) — 현재 스택 미사용, 보관용
+legacy/         초기 설계 기록(spec·스택 결정) — 코드 주석이 §인용, 보관용
 ```
 
 ## 라이선스

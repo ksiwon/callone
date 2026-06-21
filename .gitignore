@@ -29,10 +29,6 @@ reports/
 # CosyVoice/OpenVoice 참조 오디오(데이터)
 cosyvoice_ref/
 
-# === legacy 참조 앱(보관) — 산출물/대용량 제외 ===
-legacy/**/voices/
-legacy/**/pretrained_models/
-legacy/**/_backup*/
 # 신규 모델 다운로드 위치(재취득 가능, repo 밖이지만 안전망)
 models_exaone/
 models_cosyvoice/
