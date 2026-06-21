@@ -62,21 +62,29 @@ bash scripts/run_all.sh          # llama·cosy·avatar(ditto)·serve 한 방 + h
 ```
 health 4개 다 `ok`(+`avatar: backend:ditto`, `cosy: ok`) 확인. cosy 모델로드 ~30s.
 
-## 5) UI (별 터미널)
+## 5) UI (별 터미널, 인스턴스 안에서)
 ```bash
 cd ~/callone/ui
-# Node 없으면 설치. root 컨테이너(RunPod)면 sudo 없음 → 그냥 실행, 아니면 sudo.
+# Node 없으면 설치. root 컨테이너(RunPod)면 sudo 없음 → 그냥 실행, Elice 등 sudo 있으면 sudo.
 command -v npm >/dev/null || { SUDO=""; command -v sudo >/dev/null && SUDO="sudo -E"; \
   curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO bash - && ${SUDO:+sudo }apt-get install -y nodejs; }
-npm install && npm run dev       # :5173 (vite 가 /api·/ws 를 :8000 으로 프록시 — 터널은 5173만)
+npm install && npm run dev       # 평범하게(VITE_BASE 붙이지 말 것). Local: http://localhost:5173/ 떠야 정상.
 ```
+⚠️ **`VITE_BASE=/proxy/5173/` 붙이지 마라** — SSH 터널로 접속하면 localhost 직결이라 그 prefix 가 라우팅을 깨서 빈 화면 나온다. 그냥 `npm run dev`.
 
-## 6) 브라우저 (노트북)
-마이크는 HTTPS/localhost 보안컨텍스트 필요 → **SSH 터널**로 localhost 매핑:
+## 6) 브라우저 (내 노트북) — SSH 터널로 localhost 매핑
+마이크는 HTTPS/localhost 보안컨텍스트 필요 → **내 PC에서 SSH 터널**(`-L 5173:localhost:5173`):
+
+**RunPod**: Connect→Direct TCP 의 host/port 로
 ```powershell
-ssh -i <키.pem> -L 5173:localhost:5173 -p <포트> <user>@<호스트>
+ssh root@<IP> -p <포트> -i ~/.ssh/id_ed25519 -L 5173:localhost:5173
 ```
-→ `http://localhost:5173/call/me` → 음성·사진 업로드 → 통화시작 → 말 → **응답 전송**.
+**Elice**: 받은 `.pem` 키가 있는 폴더에서 터미널 열고(또는 -i 에 풀경로), Connect 의 ssh 명령에 `-L` 만 추가
+```powershell
+ssh -i elice-cloud-ondemand-XXXX.pem elicer@central-01.tcp.tunnel.elice.io -p <포트> -L 5173:localhost:5173
+```
+→ 그 창은 그대로 둠(터널). 브라우저: **`http://localhost:5173/call/me`** (← `/proxy/5173/` 같은 거 붙이지 말 것)
+→ 음성·사진 업로드 → 통화시작 → 말 → **응답 전송**.
 
 ---
 
