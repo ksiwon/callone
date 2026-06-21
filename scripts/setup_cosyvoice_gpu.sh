@@ -77,7 +77,8 @@ pip install --force-reinstall --no-deps torch==2.6.0 torchaudio==2.6.0 --index-u
 python -c "import hf_transfer" 2>/dev/null || { echo "[info] hf_transfer 없음 → HF_HUB_ENABLE_HF_TRANSFER=0(일반 다운로드)"; export HF_HUB_ENABLE_HF_TRANSFER=0; }
 
 echo "==> [5/6] 모델 다운로드(Fun-CosyVoice3-0.5B-2512, ~9.75GB)"
-if [ ! -f "$MODEL_DIR/cosyvoice.yaml" ] && [ ! -f "$MODEL_DIR/config.yaml" ]; then
+# 존재 판정: 실제 모델은 cosyvoice3.yaml + config.json 을 갖는다(구버전 cosyvoice.yaml 도 허용).
+if [ ! -f "$MODEL_DIR/cosyvoice3.yaml" ] && [ ! -f "$MODEL_DIR/cosyvoice.yaml" ] && [ ! -f "$MODEL_DIR/config.json" ]; then
   mkdir -p "$COSY_DIR/pretrained_models"
   python - <<PY
 from huggingface_hub import snapshot_download
