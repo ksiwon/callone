@@ -74,17 +74,18 @@ class StaticModel(AvatarModel):
 
 
 def _to_jpeg(image_bytes: bytes, resolution: int) -> bytes:
-    """원본 사진 → 정사각 리사이즈 JPEG(정지 백엔드 표시용). Pillow 없으면 원본 그대로."""
+    """원본 사진 → JPEG(정지 백엔드 표시용). **원본 비율 유지**(정사각 크롭 안 함). 긴 변만 제한."""
     try:
         from PIL import Image  # type: ignore
 
         im = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        maxside = max(resolution * 2, 512)
         w, h = im.size
-        s = min(w, h)
-        im = im.crop(((w - s) // 2, (h - s) // 2, (w + s) // 2, (h + s) // 2)).resize(
-            (resolution, resolution))
+        if max(w, h) > maxside:
+            scale = maxside / float(max(w, h))
+            im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))))
         buf = io.BytesIO()
-        im.save(buf, format="JPEG", quality=90)
+        im.save(buf, format="JPEG", quality=92)
         return buf.getvalue()
     except Exception:  # noqa: BLE001
         return image_bytes

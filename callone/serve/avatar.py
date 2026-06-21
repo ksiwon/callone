@@ -48,7 +48,8 @@ def _image_bytes(image) -> bytes:
 
 
 def _encode_jpeg(image, resolution: int = 256) -> bytes:
-    """사진(경로 or bytes) → 정사각 리사이즈 JPEG 바이트. Pillow 없으면 원본 바이트 그대로."""
+    """사진(경로 or bytes) → JPEG 바이트. **원본 비율 유지**(정사각 크롭 안 함 — 찌그러짐/잘림 방지).
+    긴 변만 maxside 로 제한(대역폭). Pillow 없으면 원본 바이트 그대로."""
     import io as _io
 
     raw = _image_bytes(image)
@@ -56,13 +57,13 @@ def _encode_jpeg(image, resolution: int = 256) -> bytes:
         from PIL import Image  # type: ignore
 
         im = Image.open(_io.BytesIO(raw)).convert("RGB")
-        # 증명사진 가정(정면·얼굴 중앙) → 가운데 정사각 크롭 후 resolution 리사이즈.
+        maxside = max(resolution * 2, 512)        # 긴 변 제한(비율 보존), 정사각 크롭 안 함
         w, h = im.size
-        s = min(w, h)
-        im = im.crop(((w - s) // 2, (h - s) // 2, (w + s) // 2, (h + s) // 2))
-        im = im.resize((resolution, resolution))
+        if max(w, h) > maxside:
+            scale = maxside / float(max(w, h))
+            im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))))
         buf = io.BytesIO()
-        im.save(buf, format="JPEG", quality=90)
+        im.save(buf, format="JPEG", quality=92)
         return buf.getvalue()
     except Exception as e:  # noqa: BLE001
         log.warning("Pillow 인코딩 불가(%s) — 원본 바이트 사용", e)
