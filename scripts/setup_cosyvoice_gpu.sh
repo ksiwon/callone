@@ -61,7 +61,14 @@ pip install --upgrade pip
 pip install "setuptools<81" wheel
 
 echo "==> [4/6] 의존성(빌드지옥 제외) + fastapi 서버"
-grep -vE 'tensorrt|onnxruntime-gpu|deepspeed|openai-whisper' requirements.txt > requirements_clean.txt
+# ⚠️ pynini/openfst 는 pip 빌드가 OpenFst 컴파일에서 잘 깨진다 → conda-forge 프리빌트로 먼저 깐다.
+#    이게 안 깔리면 'pip install -r requirements' 가 pynini 에서 set -e 로 죽어 hyperpyyaml/conformer
+#    등 CosyVoice 본체 의존성이 통째로 안 깔리고 → 서버가 import 단계서 하나씩 죽는다(근본원인).
+conda install -y -c conda-forge "pynini==2.1.5" openfst 2>/dev/null \
+  || pip install pynini==2.1.5 2>/dev/null \
+  || echo "[warn] pynini 설치 실패 — 텍스트정규화 일부 제한(서버 기동엔 보통 무방)"
+# requirements 에서: 빌드지옥(tensorrt/gpu/deepspeed) · 별도설치(openai-whisper) · conda로 깐 pynini 제외
+grep -vE 'tensorrt|onnxruntime-gpu|deepspeed|openai-whisper|^pynini' requirements.txt > requirements_clean.txt
 pip install -r requirements_clean.txt
 pip install onnxruntime
 pip install soundfile huggingface_hub hf_transfer faster-whisper noisereduce pydub  # hf_transfer: RunPod HF_HUB_ENABLE_HF_TRANSFER=1 대비
@@ -71,6 +78,11 @@ pip install openai-whisper==20231117 --no-build-isolation || pip install openai-
 pip install fastapi uvicorn pydantic           # callone cosyvoice_server 용
 # torch 2.6.0 cu124 고정 — 맨 마지막(위 whisper 가 깎은 torch 복구). torchaudio 2.6.0 정합 필수.
 pip install --force-reinstall --no-deps torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+# ★의존성 완전성 게이트★ — AutoModel import 가 되면 서버 기동 보장. 안 되면 여기서 멈춰 원인 표시
+#   (런타임에 모듈 하나씩 터지는 whack-a-mole 을 셋업 단계에서 차단).
+( cd "$COSY_DIR" && PYTHONPATH="third_party/Matcha-TTS:$PYTHONPATH" python -c "from cosyvoice.cli.cosyvoice import AutoModel" ) \
+  && echo "  ✅ CosyVoice import 체인 OK — 서버 기동 가능" \
+  || { echo "❌ CosyVoice import 실패 — 위 마지막 에러의 모듈 확인(보통 pynini/hyperpyyaml/conformer). 그 모듈 'pip install' 후 재실행."; exit 1; }
 
 # RunPod 이미지가 HF_HUB_ENABLE_HF_TRANSFER=1 을 전역 설정 → hf_transfer 패키지 없으면 다운로드가 크래시.
 # 설치돼 있으면 빠른 다운로드 유지, 없으면 비활성(일반 다운로드로 폴백). 설치 의존성 없이 확실히 동작.
