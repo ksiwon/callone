@@ -85,13 +85,13 @@ CRUN pip install fastapi uvicorn pydantic           # callone cosyvoice_server �
 # flash_attn: RunPod 베이스 등에서 끌려와 ABI 깨짐(undefined symbol)으로 transformers import 를 죽인다.
 # CosyVoice 엔 불필요(없으면 표준 attention) → cosyvoice env 에 있으면 제거.
 CRUN pip uninstall -y flash-attn flash_attn 2>/dev/null || true
-# torch 2.6.0 cu124 고정 — 맨 마지막(위 whisper 가 깎은 torch 복구). torchaudio 2.6.0 정합 필수.
-CRUN pip install --force-reinstall --no-deps torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
-# ⚠️ --no-deps 라 torch 2.6 의 CUDA 런타임 lib(cuSPARSELt — 2.5+ 신규 의존)이 안 따라온다 →
-#    'libcusparseLt.so.0 없음' 으로 import torch 가 죽음. 그 lib 보강(이미 있으면 무시).
-CRUN pip install nvidia-cusparselt-cu12
-CRUN python -c "import torch; assert torch.cuda.is_available; print('torch', torch.__version__, 'load OK')" \
-  || { echo "❌ torch 로드 실패 — 누락 CUDA lib 추가 필요(위 ImportError 의 lib 이름 확인)."; exit 1; }
+# torch 2.6.0 cu124 고정 — whisper 가 깎은 torch 복구. ⚠️ --no-deps 는 쓰지 않는다:
+#   쓰면 CUDA 런타임 lib 이 옛 cu121 버전(cublas 12.1·cudnn 8.9·cusparselt 등)으로 남아 torch
+#   2.6(cu124)이 'libcusparseLt.so.0 없음' 등으로 죽는다 → deps 포함 force-reinstall 로 cu124
+#   nvidia-* lib(cublas 12.4·cudnn 9.1·cusparselt 0.6.2·triton 3.2 …) 셋을 통째로 정합.
+CRUN pip install --force-reinstall torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+CRUN python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, '· cuda_avail', torch.cuda.is_available())" \
+  || { echo "❌ torch 로드 실패 — 위 ImportError 의 CUDA lib 확인."; exit 1; }
 # ★의존성 완전성 게이트★ — cosyvoice env 에서 AutoModel import 되면 서버 기동 보장. 안 되면 여기서 멈춰 원인 표시.
 export PYTHONPATH="$COSY_DIR/third_party/Matcha-TTS"
 ( cd "$COSY_DIR" && CRUN python -c "from cosyvoice.cli.cosyvoice import AutoModel" ) \
