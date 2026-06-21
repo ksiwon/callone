@@ -93,15 +93,17 @@ PY
 ) || echo "[warn] import 스캔 생략(계속)"
 
 # ── GPU 아키텍처 분기(중요) ───────────────────────────────────────────────
-# 프리빌트 TRT 엔진(ditto_trt_Ampere_Plus)은 **Ampere(A100, cc 8.0/8.6) 전용**. Ada(4090, 8.9)·Hopper
-# 에선 안 됨 → 그쪽은 **PyTorch 추론**. 두 경로의 cuDNN 요구가 달라 설치를 분기한다:
-#   - Ampere(TRT): TRT 8.6.1 + cuDNN8. (cuDNN8 이 torch 의 cuDNN9 를 치우지만, 추론은 TRT 라 무관.)
-#   - 비-Ampere(PyTorch): **cuDNN8 절대 설치 금지**(torch cuDNN9 보존해야 PyTorch 추론 동작).
-# cuda-python 은 양쪽 공통으로 옛 API('from cuda import cuda') 필요 → <12.9.
+# 얼굴 움직임 = **TRT 경로**(A100 검증). PyTorch 온라인 경로는 비-Ampere에서 0프레임(실측)이라 안 씀.
+#   - Ampere(A100·3090·3090Ti, cc 8.0/8.6): 프리빌트 엔진 ditto_trt_Ampere_Plus 그대로.
+#   - Ada(4090, 8.9)·Hopper(9.0): 프리빌트 비호환 → **cvt_onnx_to_trt 로 이 GPU용 custom 엔진 빌드**(repo 공식 방법).
+# 둘 다 TRT 8.6.1 + cuDNN8(torch cuDNN9 와 .so 버전 달라 공존, 추론은 TRT). cuda-python<12.9(import 호환).
 CK="$DITTO_REPO/checkpoints"
 CC="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')"
-USE_TRT=0
-case "$CC" in 8.0|8.6) USE_TRT=1 ;; esac
+USE_TRT=0; BUILD_TRT=0
+case "$CC" in
+  8.0|8.6) USE_TRT=1 ;;              # Ampere → 프리빌트 엔진
+  8.9|9.0) USE_TRT=1; BUILD_TRT=1 ;; # Ada(4090)/Hopper → 프리빌트 비호환, custom 빌드
+esac
 pip install --upgrade pip >/dev/null
 pip install "cuda-python<12.9" --extra-index-url https://pypi.nvidia.com   # 공통(import 호환)
 if [ "$USE_TRT" = 1 ]; then
@@ -109,26 +111,42 @@ if [ "$USE_TRT" = 1 ]; then
   pip uninstall -y tensorrt tensorrt-libs tensorrt-bindings tensorrt_cu12 tensorrt_cu12_libs tensorrt_cu12_bindings >/dev/null 2>&1 || true
   pip install tensorrt-libs==8.6.1 tensorrt-bindings==8.6.1 nvidia-cudnn-cu12==8.9.7.29 --extra-index-url https://pypi.nvidia.com
   pip install tensorrt==8.6.1 --no-build-isolation --extra-index-url https://pypi.nvidia.com || true
-  echo "  [GPU] Ampere(cc=$CC) → TensorRT 8.6.1 + cuDNN8 (프리빌트 엔진, RTF<1)"
+  [ "$BUILD_TRT" = 1 ] \
+    && echo "  [GPU] 비-Ampere(cc=$CC) → custom TRT 엔진 빌드 예정(cvt_onnx_to_trt). 프리빌트는 Ampere 전용." \
+    || echo "  [GPU] Ampere(cc=$CC) → 프리빌트 TRT 8.6.1 + cuDNN8 엔진."
 else
-  echo "  [GPU] 비-Ampere(cc=${CC:-?}) → PyTorch 경로. torch cuDNN9 유지(cuDNN8 미설치)."
-  echo "  ⚠️ 4090(Ada) 등 비-Ampere에서 Ditto PyTorch 는 현재 0프레임(애니메이션 안 됨, 음성도 막음) — 실측."
-  echo "     → 'export AVATAR_BACKEND=static' 으로 음성+정지사진 사용 권장. 움직이는 얼굴은 Ampere GPU."
+  echo "  [GPU] cc=${CC:-?} 미인식 → PyTorch 폴백(애니 0프레임 가능). AVATAR_BACKEND=static 권장."
 fi
 
-# env 고정 — DittoModel 이 이걸로 SDK 로드(위 USE_TRT 재사용).
-if [ "$USE_TRT" = 1 ] && [ -d "$CK/ditto_trt_Ampere_Plus" ] && [ -f "$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl" ]; then
-  DATA_ROOT="$CK/ditto_trt_Ampere_Plus"                       # 프리빌트 TRT 엔진(Ampere)
-  CFG_PKL="$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl"      # TRT 온라인(스트리밍) cfg
-  echo "  Ditto 백엔드: TensorRT(Ampere cc=$CC, 온라인) — RTF<1"
+# 비-Ampere: 이 GPU용 TRT 엔진을 일반 ONNX 에서 빌드(프리빌트 대체, repo scripts/cvt_onnx_to_trt.py). ~수십분, 1회.
+if [ "$BUILD_TRT" = 1 ] && [ ! -d "$CK/ditto_trt_custom" ]; then
+  if [ -d "$CK/ditto_onnx" ] && [ -f "$DITTO_REPO/scripts/cvt_onnx_to_trt.py" ]; then
+    echo "=== [GPU] custom TRT 엔진 빌드 중 (cvt_onnx_to_trt, 수십분) ... ==="
+    ( cd "$DITTO_REPO" && python scripts/cvt_onnx_to_trt.py --onnx_dir "$CK/ditto_onnx" --trt_dir "$CK/ditto_trt_custom" ) \
+      && echo "  ✅ custom TRT 엔진 완료: $CK/ditto_trt_custom" \
+      || { echo "  ⚠️ custom TRT 빌드 실패 — TRT 버전/드라이버 호환 확인 필요. 우선 AVATAR_BACKEND=static(음성+정지사진)."; rm -rf "$CK/ditto_trt_custom" 2>/dev/null || true; }
+  else
+    echo "  ⚠️ ditto_onnx 또는 cvt_onnx_to_trt.py 없음 → custom 빌드 스킵. AVATAR_BACKEND=static 권장."
+  fi
+fi
+
+# env 고정 — DATA_ROOT 우선순위: Ampere 프리빌트 > custom(비-Ampere) > PyTorch(폴백). 모두 TRT online cfg.
+TRT_CFG="$CK/ditto_cfg/v0.4_hubert_cfg_trt_online.pkl"
+if [ "$BUILD_TRT" != 1 ] && [ -d "$CK/ditto_trt_Ampere_Plus" ] && [ -f "$TRT_CFG" ]; then
+  DATA_ROOT="$CK/ditto_trt_Ampere_Plus"; CFG_PKL="$TRT_CFG"
+  BACKEND_LABEL="Ditto TensorRT(Ampere 프리빌트, cc=$CC) — 움직임 O"
+elif [ -d "$CK/ditto_trt_custom" ] && [ -f "$TRT_CFG" ]; then
+  DATA_ROOT="$CK/ditto_trt_custom"; CFG_PKL="$TRT_CFG"
+  BACKEND_LABEL="Ditto TensorRT(custom 빌드, cc=$CC) — 움직임 O"
 else
-  # PyTorch: aux_models(det_10g.onnx)의 조부모(=ditto_pytorch) + hubert pytorch cfg.
+  # PyTorch 최후 폴백(비-Ampere custom 빌드 실패 시). 0프레임 가능 → static 권장.
   DATA_ROOT="$(find "$CK" -name det_10g.onnx 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"
   [ -z "$DATA_ROOT" ] && DATA_ROOT="$CK/ditto_pytorch"
   CFG_PKL="$(find "$CK" -name '*cfg*pytorch*.pkl' 2>/dev/null | grep -i hubert | head -1)"
   [ -z "$CFG_PKL" ] && CFG_PKL="$(find "$CK" -name '*pytorch*.pkl' 2>/dev/null | head -1)"
-  echo "  Ditto 백엔드: PyTorch(cc=${CC:-?}) — ⚠️ 비-Ampere 애니메이션 미동작(0프레임). AVATAR_BACKEND=static 권장"
+  BACKEND_LABEL="Ditto PyTorch(폴백, cc=${CC:-?}) — ⚠️ 비-Ampere 애니 0프레임 가능, AVATAR_BACKEND=static 권장"
 fi
+echo "  Ditto 백엔드: $BACKEND_LABEL"
 sed -i '/export DITTO_REPO=/d;/export DITTO_DATA_ROOT=/d;/export DITTO_CFG_PKL=/d' ~/.bashrc
 { echo "export DITTO_REPO=$DITTO_REPO"
   echo "export DITTO_DATA_ROOT=$DATA_ROOT"
@@ -140,7 +158,6 @@ python - <<'PY' || echo "⚠️ torch GPU 실패 — 드라이버 호환 CUDA �
 import torch; assert torch.cuda.is_available(); print("torch", torch.__version__, "cuda", torch.version.cuda, "OK")
 PY
 
-if [ "$USE_TRT" = 1 ]; then BACKEND_LABEL="Ditto TensorRT(Ampere, 움직임 O)"; else BACKEND_LABEL="Ditto PyTorch(비-Ampere — 애니 미동작, AVATAR_BACKEND=static 권장)"; fi
 cat <<EOF
 
 === avatar-server 준비 완료($BACKEND_LABEL) ===

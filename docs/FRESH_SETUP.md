@@ -94,17 +94,17 @@ bash scripts/run_all.sh          # 다 떠 있으면 health만, 죽은 것만 �
 - **첫 턴 영상은 콜드(~30s, TRT 첫 추론)** — 이후 턴은 RTF<1로 빠름. 정상.
 - **A/V 동기**: 음성이 영상 생성을 기다렸다 같이 재생(입싱크 우선). 음성전용(사진 미업로드)이면 지연 없음.
 - **프라이버시**: 음성·사진·대화는 프론트(브라우저) 소유. 서버는 인메모리(/dev/shm)만, 통화 끝나면 폐기. 디스크/로그에 본문 0.
-- **⚠️ 움직이는 얼굴(Ditto)은 Ampere GPU에서만 검증됨**:
-  - **A100/H100/3090/A5000/A6000 등 Ampere(cc 8.0/8.6)** → 프리빌트 TRT 엔진(`ditto_trt_Ampere_Plus`)으로
-    **얼굴이 실제로 움직임**(립싱크·표정, RTF<1). ✅ 검증된 경로.
-  - **RTX 4090/L40 등 Ada(cc 8.9)** → 프리빌트 TRT 비호환 → Ditto **PyTorch 폴백인데 현재 0프레임으로 안 움직임**
-    (실측: 오디오 청크 크기가 PyTorch 모델 기대값과 불일치 → 모션 생성 실패. 게다가 음성까지 막음).
-    **→ 4090에선 `AVATAR_BACKEND=static` 으로 띄워라**(음성 + 정지사진은 정상 동작 확인됨):
+- **움직이는 얼굴(Ditto) — GPU별 경로(`setup_avatar_gpu.sh` 자동 처리)**:
+  - **A100/H100/3090/3090Ti/A5000/A6000 등 Ampere(cc 8.0/8.6)** → 프리빌트 TRT 엔진(`ditto_trt_Ampere_Plus`)으로
+    **얼굴 움직임**(립싱크·표정, RTF<1). ✅ 검증된 경로(빌드 없음, 바로 됨).
+  - **RTX 4090/L40 등 Ada(cc 8.9)** → 프리빌트 비호환이라, setup 이 **이 GPU용 TRT 엔진을 ONNX에서 자동 빌드**
+    (`cvt_onnx_to_trt` → `ditto_trt_custom`, ~수십분 1회). 성공하면 **4090도 얼굴 움직임**. ⚠️ TRT↔드라이버 버전이
+    안 맞아 빌드가 깨질 수 있음(미실측) — 그 경우 PyTorch는 0프레임이라 **`AVATAR_BACKEND=static`(음성+정지사진)** 으로:
     ```bash
-    echo 'export AVATAR_BACKEND=static' >> ~/.bashrc && source ~/.bashrc
-    bash scripts/run_all.sh
+    echo 'export AVATAR_BACKEND=static' >> ~/.bashrc && source ~/.bashrc && bash scripts/run_all.sh
     ```
-    움직이는 얼굴이 필요하면 **Ampere GPU**를 써라(위). 4090 PyTorch 애니메이션은 Ditto 온라인 청크 정합 작업이 추가로 필요.
-  - **음성·한국어·목소리복제·정지사진은 A100/4090 둘 다 동일하게 동작**(LLM EXAONE·TTS CosyVoice3·ASR 동일).
+    가장 확실한 움직이는 얼굴은 여전히 **Ampere GPU**(빌드 불필요).
+  - setup 끝의 `Ditto 백엔드:` 줄로 확인 — `TensorRT(Ampere 프리빌트)` / `TensorRT(custom 빌드)` = 움직임 O, `PyTorch(폴백)` = static 권장.
+  - **음성·한국어·목소리복제·정지사진은 모든 GPU 동일 동작**(LLM EXAONE·TTS CosyVoice3·ASR).
 - **로그**: `~/serve.log` `~/avatar.log` `~/cosyvoice.log` `~/llama.log` (본문 없음 — 길이·지연만)
 - **단계별 시간**: `grep -E "ASR 완료|LLM 완료|아바타" ~/serve.log`
