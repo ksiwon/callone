@@ -129,9 +129,10 @@ python - <<'PY' || echo "⚠️ torch GPU 실패 — 드라이버 호환 CUDA �
 import torch; assert torch.cuda.is_available(); print("torch", torch.__version__, "cuda", torch.version.cuda, "OK")
 PY
 
+if [ "$USE_TRT" = 1 ]; then BACKEND_LABEL="Ditto TensorRT(Ampere, RTF<1)"; else BACKEND_LABEL="Ditto PyTorch(폴백, RTF~1.6)"; fi
 cat <<EOF
 
-=== avatar-server 준비 완료(Ditto PyTorch) ===
+=== avatar-server 준비 완료($BACKEND_LABEL) ===
   DITTO_DATA_ROOT=$DATA_ROOT
   DITTO_CFG_PKL=$CFG_PKL
   기동:   AVATAR_BACKEND=ditto python -m avatar_server --port 8091
