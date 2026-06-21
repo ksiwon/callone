@@ -63,8 +63,10 @@ health 4개 다 `ok`(+`avatar: backend:ditto`, `cosy: ok`) 확인. cosy 모델�
 ## 5) UI (별 터미널)
 ```bash
 cd ~/callone/ui
-[ -x "$(command -v npm)" ] || { curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs; }
-npm install && npm run dev       # :5173
+# Node 없으면 설치. root 컨테이너(RunPod)면 sudo 없음 → 그냥 실행, 아니면 sudo.
+command -v npm >/dev/null || { SUDO=""; command -v sudo >/dev/null && SUDO="sudo -E"; \
+  curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO bash - && ${SUDO:+sudo }apt-get install -y nodejs; }
+npm install && npm run dev       # :5173 (vite 가 /api·/ws 를 :8000 으로 프록시 — 터널은 5173만)
 ```
 
 ## 6) 브라우저 (노트북)
