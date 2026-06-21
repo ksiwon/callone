@@ -73,12 +73,12 @@ def _pick_llm(speaker: str, serve_cfg: dict):
 
     # 2) OpenVINO (base Qwen3-4B) — 배포 변환본 → 테스트용 base OV
     if backend in ("ov", "auto"):
-        for md in (f"models/llm_ov/{speaker}", "models_ov/qwen3-4b-int4"):
+        for md in (f"models/llm_ov/{speaker}", "models_ov/exaone-2.4b-int4"):
             if Path(md).exists():
                 try:
                     from .ov_llm import OVPersonaLLM
 
-                    dev = load_config("llm_phone").get("device", "GPU")
+                    dev = load_config("llm_laptop").get("device", "GPU")
                     return OVPersonaLLM(speaker, md, device=dev,
                                         max_new_tokens=160, temperature=0.7)
                 except Exception as e:  # noqa: BLE001

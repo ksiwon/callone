@@ -2,10 +2,10 @@
 host: "0.0.0.0"
 port: 8000
 # 실행 티어: auto 면 하드웨어 감지(common/hardware.detect_tier).
-#   server_gpu(H100) | laptop_cpu(32GB 노트북·무GPU) | phone(온디바이스)
+#   server_gpu(H100/A100/4090) | laptop_cpu(노트북 Arc iGPU)   ※ 폰 경로 폐기
 # CALLONE_TIER 환경변수로 강제 가능.
 tier: auto
-mode: server                   # server(고품질) | phone(온디바이스) — tier 가 우선
+mode: server                   # server(고품질) | laptop(경량) — tier 가 우선
 # 워밍업: Orchestrator 생성 시 ASR/LLM/TTS 더미 1회 예열(CUDA graph 빌드 + ref 인코딩 캐시 +
 # llama-server 슬롯). 첫 통화 턴의 콜드스타트(수 초)를 셋업 시간으로 옮긴다. 목소리 영향 0.
 # (스모크/CI 처럼 모델 없이 폴백만 돌릴 땐 false 로 두면 빠름.)
@@ -29,7 +29,7 @@ llm:
   #   auto  = llama 먼저 시도(서버 떠있으면), 없으면 ov → 폴백
   backend: auto                # auto | llama | ov | vllm
   base_url: "http://127.0.0.1:8090"   # llama-server 주소(Elice 가 8080 점유 → 8090 기본. bootstrap 이 PORT 로 동기)
-  config: llm_phone            # llm_server(서버 EXAONE-3.5-7.8B) | llm_phone(노트북 Qwen3.5-4B)
+  config: llm_laptop           # llm_server(서버 EXAONE-3.5-7.8B) | llm_laptop(노트북 EXAONE-3.5-2.4B)
   enable_thinking: false       # §1-3: 대화용 thinking 비활성(응답 지연 억제)
   # 기억 회상: extract_memories.py 로 memories.json 만든 뒤 true 권장(의미검색=삼천포 없음).
   use_rag: false               # 사실 추출 후 true 로

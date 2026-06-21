@@ -34,20 +34,20 @@ callone-correct --hours 3
 callone-asr-train
 
 # (2) 목소리 복제
-callone-tts-train  --speakers A B      # 서버 고품질 (Qwen3-TTS / VoxCPM2)
-callone-tts-phone  --speakers A B      # 폰용 경량 (Piper / MeloTTS)
+callone-tts-train   --speakers A B      # 서버 고품질 (풀튜닝 화자 TTS)
+callone-tts-laptop  --speakers A B      # 노트북용 경량 (Piper / MeloTTS / Kokoro)
 
 # (3) 말투·성격 복제
 callone-llm-train  --config llm_server --speakers A B   # EXAONE-3.5-7.8B (한국어 특화)
-callone-llm-train  --config llm_phone  --speakers A B   # 폰용 Qwen3.5-4B (경량·온디바이스)
+callone-llm-train  --config llm_laptop --speakers A B   # 노트북용 EXAONE-3.5-2.4B (경량)
 ```
 
 ## 결과물 (학습된 모델)
 - `models/asr_dialect/` — 방언 적응 ASR
-- `models/tts_server/{A,B}/`, `models/tts_phone/{A,B}/` — 목소리
-- `models/llm_server/{A,B}/`, `models/llm_phone/{A,B}/` — 말투
+- `models/tts_server/{A,B}/`, `models/tts_laptop/{A,B}/` — 목소리
+- `models/llm_server/{A,B}/`, `models/llm_laptop/{A,B}/` — 말투
 
-이 `models/` 폴더를 노트북/폰으로 가져가면 통화 가능 → [3번](3_노트북에서_통화.md) · [4번](4_휴대폰에서_통화.md).
+이 `models/` 폴더를 노트북으로 가져가면 통화 가능 → [3번](3_노트북에서_통화.md).
 
 ## 통화까지 서버에서 바로
 ```bash

@@ -1,17 +1,17 @@
-"""llama.cpp(llama-server) LLM 백엔드 — Qwen3.5-4B + LoRA, 노트북 온디바이스.
+"""llama.cpp(llama-server) LLM 백엔드 — EXAONE GGUF(서버) / 경량 GGUF(노트북) + LoRA, HTTP.
 
-OpenVINO 는 qwen3_5 아키텍처(Gated Delta Net+MoE+MTP) 변환을 아직 못 한다
-(optimum-intel #1628). 반면 llama.cpp 는 Qwen3.5 를 지원하고 LoRA 도 적용 가능.
-그래서 **llama-server 를 별도 프로세스로 띄우고 HTTP(OpenAI 호환)로 호출**한다.
+llama.cpp 는 GGUF 로 모델을 바로 서빙하고 LoRA 도 적용 가능 → **llama-server 를 별도
+프로세스로 띄우고 HTTP(OpenAI 호환)로 호출**한다. 기본 서빙은 EXAONE-3.5-7.8B GGUF
+(bootstrap_gpu.sh 가 다운·기동). 노트북은 OpenVINO(ov_llm) 경로가 별도.
 
 장점:
   - 서빙 파이썬엔 torch/OpenVINO 가 전혀 없음 → segfault 원천 차단(HTTP 클라이언트뿐).
   - 페르소나 카드(system) + RAG(화자 A 실제 발화) + 문장단위 스트리밍 그대로 재사용.
   - GPU 백엔드(Vulkan coopmat-off / SYCL / IPEX) 든 CPU 든 **같은 HTTP 코드**.
 
-서버 띄우는 법(노트북, 별도 터미널) — scripts/run_llama_server.md 참고:
-  llama-server -m qwen3.5-4b-Q4_K_M.gguf --lora mom-lora-f16.gguf \
-      -ngl 99 --host 127.0.0.1 --port 8080 -c 4096
+서버 띄우는 법(별도 터미널) — scripts/run_llama_server.md / bootstrap_gpu.sh 참고:
+  llama-server -m EXAONE-3.5-7.8B-...-Q6_K.gguf [--lora spk-lora-f16.gguf] \
+      -ngl 99 --host 127.0.0.1 --port 8090 -c 4096 --jinja
 (Arc Vulkan TDR 회피: 환경변수 GGML_VK_DISABLE_COOPMAT=1)
 
 인터페이스는 OVPersonaLLM 과 동일: chat() / chat_stream().

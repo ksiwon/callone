@@ -131,12 +131,12 @@ class ProfileUser(BaseModel):
 
 class ProfileTTS(BaseModel):
     server_model: Optional[str] = None
-    phone_model: Optional[str] = None
+    laptop_model: Optional[str] = None
 
 
 class ProfileLLM(BaseModel):
-    lora_12b: Optional[str] = None
-    lora_e4b: Optional[str] = None
+    lora_server: Optional[str] = None
+    lora_laptop: Optional[str] = None
 
 
 class SpeakerProfile(BaseModel):

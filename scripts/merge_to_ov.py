@@ -1,6 +1,6 @@
 """LoRA 어댑터 → base 병합 → OpenVINO int4 변환 (노트북 배포용).
 
-학습 산출물 models/llm_phone/{spk}(LoRA) 를 Qwen3.5-4B 에 병합하고
+학습 산출물 models/llm_laptop/{spk}(LoRA) 를 EXAONE-3.5-2.4B 에 병합하고
 OpenVINO IR(int4) 로 내보낸다. 결과를 노트북으로 복사해 OVPersonaLLM 으로 구동.
 
 필요: transformers, peft, optimum-intel (학습 venv 에 있음; optimum-intel 추가 설치 가능)
@@ -8,7 +8,7 @@ OpenVINO IR(int4) 로 내보낸다. 결과를 노트북으로 복사해 OVPerson
 
 사용:
   python scripts/merge_to_ov.py --speaker A
-  python scripts/merge_to_ov.py --speaker A --base Qwen/Qwen3.5-4B --bits int4
+  python scripts/merge_to_ov.py --speaker A --base LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct --bits int4
 """
 from __future__ import annotations
 
@@ -59,15 +59,15 @@ def to_openvino(merged_dir: Path, ov_dir: Path, bits: str):
 def main():
     ap = argparse.ArgumentParser(description="LoRA 병합 + OpenVINO 변환")
     ap.add_argument("--speaker", default="A")
-    ap.add_argument("--config", default="llm_phone")
+    ap.add_argument("--config", default="llm_laptop")
     ap.add_argument("--base", default=None)
     ap.add_argument("--bits", default="int4", help="int4 | int8 | fp16")
     ap.add_argument("--keep-merged", action="store_true", help="병합본(fp) 보존")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
-    base = args.base or cfg.get("base_model", "Qwen/Qwen3.5-4B")
-    root = Path(cfg.get("output_dir", "models/llm_phone")) / args.speaker
+    base = args.base or cfg.get("base_model", "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct")
+    root = Path(cfg.get("output_dir", "models/llm_laptop")) / args.speaker
     # 어댑터 위치: 루트(adapter_config.json) 또는 checkpoint-*/ 하위
     lora_dir = None
     if (root / "adapter_config.json").exists():

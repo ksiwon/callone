@@ -1,10 +1,10 @@
-"""OpenVINO GenAI LLM 백엔드 (노트북 온디바이스) — Qwen3.5-4B int4, Arc iGPU.
+"""OpenVINO GenAI LLM 백엔드 (노트북 Arc iGPU) — EXAONE-3.5-2.4B int4.
 
-실측(갤럭시북5 Pro): 4B int4 GPU 29.9 tok/s, 첫음성 ~1.5초 = 실시간.
-페르소나 카드(system) + RAG(화자 A 실제 발화) 주입 + 문장단위 스트리밍(TTS 트리거).
+참고 실측(갤럭시북5 Pro, 옛 Qwen3.5-4B): int4 GPU 29.9 tok/s, 첫음성 ~1.5초 = 실시간.
+EXAONE-2.4B 는 더 작아 동급↑ 기대(미실측). 페르소나 카드(system) + RAG + 문장단위 스트리밍.
 
 모델 경로: OpenVINO IR 디렉토리 (scripts/merge_to_ov.py 로 LoRA 병합+변환한 것,
-또는 테스트용 base OV 모델 models_ov/qwen3-4b-int4).
+또는 테스트용 base OV 모델 models_ov/exaone-2.4b-int4).
 """
 from __future__ import annotations
 

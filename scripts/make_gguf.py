@@ -102,7 +102,7 @@ def main():
     ap = argparse.ArgumentParser(description="LoRA 병합 → GGUF 변환")
     ap.add_argument("--speaker", default="A")
     ap.add_argument("--config", default="llm_server",
-                    help="llm_server(EXAONE-7.8B 서버) | llm_phone(Qwen3.5-4B 노트북)")
+                    help="llm_server(EXAONE-7.8B 서버) | llm_laptop(EXAONE-2.4B 노트북)")
     ap.add_argument("--base", default=None, help="기본: config 의 base_model")
     ap.add_argument("--llama-cpp", required=True, help="llama.cpp 저장소 경로(convert/quantize)")
     ap.add_argument("--out", default="models_gguf")
@@ -111,8 +111,8 @@ def main():
     args = ap.parse_args()
 
     cfg = load_config(args.config)
-    base = args.base or cfg.get("base_model", "Qwen/Qwen3.5-4B")
-    root = Path(cfg.get("output_dir", "models/llm_phone")) / args.speaker
+    base = args.base or cfg.get("base_model", "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct")
+    root = Path(cfg.get("output_dir", "models/llm_laptop")) / args.speaker
     lora_dir = find_lora(root)
     if lora_dir is None:
         log.error("LoRA adapter 없음: %s (또는 checkpoint-*/)", root)

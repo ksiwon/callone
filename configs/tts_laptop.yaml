@@ -1,6 +1,7 @@
-# S4 폰 TTS (§14) — 온디바이스, 경량, 한국어
-# ※ §3 검증(2026-06): Kokoro + KokoClone 채택.
-#   - Kokoro 82M, 한국어 지원, 실시간, 폰 탑재 가능.
+# S4 노트북 TTS (§14) — 노트북 온디바이스, 경량, 한국어
+# 노트북(Arc/CPU)은 CUDA 없어 CosyVoice3(서버용) 불가 → 경량 TTS.
+# ※ Kokoro + KokoClone 채택.
+#   - Kokoro 82M, 한국어 지원, 실시간, CPU/Arc 구동 가능.
 #   - KokoClone = ECAPA-TDNN 화자 임베딩 교체로 **학습 0**(제로샷 클론). 우리가 이미 ECAPA 뽑음 → 딱 맞음.
 backend: kokoro                # kokoro(+kokoclone) | piper | melotts | gpt-sovits
 sample_rate: 24000
@@ -10,4 +11,4 @@ kokoro:
   ref_clips_topk_snr: 50       # SNR 상위 N개 클립으로 화자 임베딩 산출
 # per-speaker 고충실 대안(학습 필요): piper/melotts/kitten — 데이터 풍부(화자 A 73분/화자 B 131분)라 가능
 fallback_backend: melotts      # Kokoro 클론 음색이 부족하면 per-speaker 학습으로 전환
-output_dir: "models/tts_phone"
+output_dir: "models/tts_laptop"

@@ -1,13 +1,13 @@
 """S5 화자 페르소나 LoRA/QLoRA 파인튜닝 (선택적·고급, mode B).
 
-같은 SFT 데이터로 서버용·노트북용 LoRA 각각 → models/llm_server/{spk}, models/llm_phone/{spk}.
-베이스/템플릿은 configs/llm_server.yaml·llm_phone.yaml 참조(EXAONE 기본). HF+QLoRA 또는 Unsloth.
+같은 SFT 데이터로 서버용·노트북용 LoRA 각각 → models/llm_server/{spk}, models/llm_laptop/{spk}.
+베이스/템플릿은 configs/llm_server.yaml·llm_laptop.yaml 참조(EXAONE 기본). HF LoRA(trl).
 
 무거운 의존성(transformers/peft/bitsandbytes) — H100. 미설치 시 레시피 안내.
 
 사용:
   callone-llm-train --config llm_server --speakers A
-  callone-llm-train --config llm_phone  --speakers A
+  callone-llm-train --config llm_laptop --speakers A
 """
 from __future__ import annotations
 
@@ -176,7 +176,7 @@ def _print_recipe(cfg: dict, spk: str) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="S5 화자 페르소나 LoRA 파인튜닝(EXAONE 기본)")
-    ap.add_argument("--config", default="llm_server", help="llm_server | llm_phone")
+    ap.add_argument("--config", default="llm_server", help="llm_server | llm_laptop")
     ap.add_argument("--speakers", nargs="+", default=["A"])
     args = ap.parse_args()
     cfg = load_config(args.config)

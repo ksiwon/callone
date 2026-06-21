@@ -2,7 +2,7 @@
 
 티어 자동 선택(common/hardware):
   - server_gpu(H100) → llama.cpp/vLLM(EXAONE-3.5-7.8B + LoRA)  [llm_server.yaml]
-  - laptop_cpu/phone → Ollama/llama.cpp(Qwen3.5-4B + LoRA)  [llm_phone.yaml]
+  - laptop_cpu → OpenVINO/llama.cpp(EXAONE-3.5-2.4B + LoRA)  [llm_laptop.yaml]
 페르소나 프롬프트 + RAG + 메모리 결합. 미설치 시 규칙 기반 폴백 응답(지연 측정용).
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ class PersonaLLM:
         if cfg is None:
             # 하드웨어 티어에 맞는 LLM config 자동 선택
             tier = detect_tier()
-            llm_cfg_name = tier_defaults(tier)["llm_config"]   # llm_server | llm_phone
+            llm_cfg_name = tier_defaults(tier)["llm_config"]   # llm_server | llm_laptop
             log.info("LLM 티어=%s → config=%s", tier, llm_cfg_name)
             cfg = load_config(llm_cfg_name)
         self.cfg = cfg
