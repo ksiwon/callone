@@ -288,10 +288,14 @@ export default function CallScreen() {
     console.log(`[A/V] frames=${frames.length} dur=${dur.toFixed(2)}s → ${(frames.length / Math.max(dur, 0.01)).toFixed(1)}fps`);
     if (bitmaps.length) {
       setHasVideo(true);
-      // 입이 대사보다 살짝 늦는 보정: 영상을 AV_LEAD_S 만큼 **앞당겨** 재생(오디오 시각 el 에 리드를
-      // 더해 그만큼 미래 프레임 표시). Ditto 스트리밍 초반 뉴트럴 프레임 + 모델 룩어헤드의 고유 지연을
-      // 상쇄. 입이 여전히 늦으면 값↑, 너무 앞서면 값↓ (실측 튜닝 노브, 초 단위).
-      const AV_LEAD_S = 0.12;
+      // 입이 대사보다 늦는 보정: 영상을 AV_LEAD_S 만큼 **앞당겨** 재생(오디오 시각 el 에 리드를 더해
+      // 그만큼 미래 프레임 표시). Ditto 스트리밍 초반 뉴트럴 프레임 + 모델 룩어헤드의 고유 지연을 상쇄.
+      // **브라우저에서 즉시 튜닝**: devtools 콘솔에 `localStorage.callone_av_lead = 0.3` 입력 후 새로고침
+      //   (입이 여전히 늦으면 값↑, 너무 앞서면 값↓). 미설정 시 기본 0.25s.
+      const AV_LEAD_S = (() => {
+        const v = parseFloat(localStorage.getItem("callone_av_lead") || "");
+        return Number.isFinite(v) ? v : 0.25;
+      })();
       drawBitmap(bitmaps[0]);
       const startPerf = performance.now() + (startAt - ctx.currentTime) * 1000;
       let last = -1;
