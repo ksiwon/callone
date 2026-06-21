@@ -288,21 +288,24 @@ export default function CallScreen() {
     console.log(`[A/V] frames=${frames.length} dur=${dur.toFixed(2)}s → ${(frames.length / Math.max(dur, 0.01)).toFixed(1)}fps`);
     if (bitmaps.length) {
       setHasVideo(true);
-      // 입이 대사보다 늦는 보정: 영상을 AV_LEAD_S 만큼 **앞당겨** 재생(오디오 시각 el 에 리드를 더해
-      // 그만큼 미래 프레임 표시). Ditto 스트리밍 초반 뉴트럴 프레임 + 모델 룩어헤드의 고유 지연을 상쇄.
-      // **브라우저에서 즉시 튜닝**: devtools 콘솔에 `localStorage.callone_av_lead = 0.3` 입력 후 새로고침
-      //   (입이 여전히 늦으면 값↑, 너무 앞서면 값↓). 미설정 시 기본 0.25s.
+      // 립싱크 보정: Ditto 스트리밍 초반의 뉴트럴(무동작) 프레임 때문에 입이 음성보다 늦게 시작한다.
+      // → 앞쪽 skip 프레임을 건너뛰고, **남은 프레임을 오디오 전체 길이에 펼쳐** 마지막 프레임이 음성
+      //   끝과 일치하게 한다(앞은 당기고 끝은 안 비움 — 영상이 음성보다 일찍 끝나는 것까지 방지).
+      // AV_LEAD_S = 건너뛸 앞 구간(초). 브라우저 즉시 튜닝: `localStorage.callone_av_lead = 0.35` 후 새로고침
+      //   (입이 여전히 늦으면 값↑, 너무 앞서면 값↓). 미설정 시 기본 0.3s.
       const AV_LEAD_S = (() => {
         const v = parseFloat(localStorage.getItem("callone_av_lead") || "");
-        return Number.isFinite(v) ? v : 0.25;
+        return Number.isFinite(v) ? v : 0.3;
       })();
-      drawBitmap(bitmaps[0]);
+      const skip = Math.min(bitmaps.length - 1, Math.max(0, Math.round(AV_LEAD_S / dur * bitmaps.length)));
+      const span = bitmaps.length - 1 - skip;                 // 남은 프레임 → 오디오 전체에 균등 배치(끝 일치)
+      drawBitmap(bitmaps[skip]);
       const startPerf = performance.now() + (startAt - ctx.currentTime) * 1000;
       let last = -1;
       const tick = () => {
         const el = (performance.now() - startPerf) / 1000;   // 오디오 경과(초)
         if (el >= 0) {
-          const idx = Math.min(bitmaps.length - 1, Math.max(0, Math.floor((el + AV_LEAD_S) / dur * bitmaps.length)));
+          const idx = Math.min(bitmaps.length - 1, Math.max(0, skip + Math.floor(el / dur * span)));
           if (idx !== last) { drawBitmap(bitmaps[idx]); last = idx; }
         }
         if (el < dur) { rafRef.current = requestAnimationFrame(tick); }
