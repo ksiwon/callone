@@ -20,9 +20,11 @@ echo "=== [0] 시스템 라이브러리(GL/X11/오디오) — Ditto 렌더·cv2 
 if command -v sudo >/dev/null 2>&1; then APT="sudo apt-get"; elif command -v apt-get >/dev/null 2>&1; then APT="apt-get"; else APT=""; fi
 if [ -n "$APT" ]; then
   $APT update 2>/dev/null || true
-  $APT install -y libgl1 libglx-mesa0 libgles2 libegl1 libglvnd0 libglib2.0-0 \
+  # ⚠️ libGLESv2.so.2 는 libgles2 가 아니라 **libgles2-mesa** 가 제공한다(실측). 둘 다 넣는다.
+  $APT install -y libgl1 libglx-mesa0 libgles2-mesa libgles2 libegl1 libglvnd0 libglib2.0-0 \
     libsm6 libxext6 libxrender1 libxi6 libxrandr2 libxfixes3 libgomp1 libsndfile1 ffmpeg \
-    || echo "[info] apt 일부 실패 — libGLESv2.so.2 없으면 Ditto 가 static 으로 폴백한다"
+    || echo "[info] apt 일부 실패 — libGLESv2.so.2(libgles2-mesa) 없으면 Ditto 가 static 으로 폴백"
+  ldconfig 2>/dev/null || true   # 새 .so 캐시 갱신(설치 후 곧바로 로더가 찾게)
 else
   echo "[info] apt 없음 — GL 라이브러리 수동 설치 필요(없으면 Ditto static 폴백)"
 fi
