@@ -72,6 +72,10 @@ pip install fastapi uvicorn pydantic           # callone cosyvoice_server 용
 # torch 2.6.0 cu124 고정 — 맨 마지막(위 whisper 가 깎은 torch 복구). torchaudio 2.6.0 정합 필수.
 pip install --force-reinstall --no-deps torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 
+# RunPod 이미지가 HF_HUB_ENABLE_HF_TRANSFER=1 을 전역 설정 → hf_transfer 패키지 없으면 다운로드가 크래시.
+# 설치돼 있으면 빠른 다운로드 유지, 없으면 비활성(일반 다운로드로 폴백). 설치 의존성 없이 확실히 동작.
+python -c "import hf_transfer" 2>/dev/null || { echo "[info] hf_transfer 없음 → HF_HUB_ENABLE_HF_TRANSFER=0(일반 다운로드)"; export HF_HUB_ENABLE_HF_TRANSFER=0; }
+
 echo "==> [5/6] 모델 다운로드(Fun-CosyVoice3-0.5B-2512, ~9.75GB)"
 if [ ! -f "$MODEL_DIR/cosyvoice.yaml" ] && [ ! -f "$MODEL_DIR/config.yaml" ]; then
   mkdir -p "$COSY_DIR/pretrained_models"
