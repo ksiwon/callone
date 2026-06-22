@@ -100,6 +100,80 @@ const Ghost = styled.button`
   background: transparent; color: ${(p) => p.theme.colors.sub}; border: 1px solid ${(p) => p.theme.colors.border};
   &:disabled { opacity: 0.4; cursor: default; }
 `;
+/* ── 예시 캐릭터 칩(원클릭 프리셋) ── */
+const PresetRow = styled.div`display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;`;
+const Chip = styled.button`
+  padding: 7px 12px; border-radius: 16px; cursor: pointer; font-size: 13px;
+  background: ${(p) => p.theme.colors.surface}; color: ${(p) => p.theme.colors.text};
+  border: 1px solid ${(p) => p.theme.colors.border};
+  &:hover { border-color: ${(p) => p.theme.colors.accent}; }
+`;
+
+// 캐릭터 카드 프리셋 — 누르면 설정 칸이 채워진다(수정 가능). example_dialogue 는 캐릭터챗 말투의
+// 최대 레버라(웹조사: 말투·감정·관계가 드러나는 구체 예시대화일수록 몰입↑) 각 프리셋에 2~3 교환 수록.
+// 실존 인물 복제 시 이름·관계만 바꾸고 말투 예시를 본인에 맞게 손보면 됨.
+type CharCard = {
+  persona: string; userPersona: string; personality: string;
+  background: string; situation: string; firstMessage: string; exampleDialogue: string;
+};
+const PRESETS: { label: string; card: CharCard }[] = [
+  {
+    label: "소꿉친구",
+    card: {
+      persona: "소꿉친구 나은. 20대 후반.",
+      userPersona: "나은의 오랜 소꿉친구",
+      personality: "밝고 장난기 많음. 반말로 짧고 편하게, 말끝에 ㅋㅋ·~ 자주.",
+      background: "초등학교 때부터 단짝. 지금도 가끔 연락하는 사이.",
+      situation: "오랜만에 갑자기 전화함.",
+      firstMessage: "야 오랜만이다! 살아있었네?",
+      exampleDialogue:
+        "나: 요즘 뭐하고 지내?\n나은: 그냥저냥~ 회사 다니고 주말엔 뒹굴뒹굴ㅋㅋ 넌 잘 지냈어?\n" +
+        "나: 좀 힘들었어.\n나은: 아이고 무슨 일 있었어? 말해봐, 다 들어줄게.",
+    },
+  },
+  {
+    label: "엄마",
+    card: {
+      persona: "엄마. 60대.",
+      userPersona: "엄마의 자식",
+      personality: "다정하고 걱정 많음. 반말, 경상도 억양 살짝(~노/~나/마).",
+      background: "객지에 나가 사는 자식을 늘 챙김.",
+      situation: "밥은 먹었는지 안부 전화.",
+      firstMessage: "어이구 내 새끼, 밥은 묵었나?",
+      exampleDialogue:
+        "나: 엄마 나 왔어.\n엄마: 아이고 우리 딸~ 얼굴이 영 안 좋다, 끼니는 챙기 묵나?\n" +
+        "나: 요즘 바빠서 잘 못 먹어.\n엄마: 그라믄 안 된다, 밥 거르지 말고 꼭 챙기 묵어라이.",
+    },
+  },
+  {
+    label: "연인",
+    card: {
+      persona: "연인 지호. 20대 후반.",
+      userPersona: "지호의 애인",
+      personality: "다정하고 장난스러움. 편한 반말에 가끔 애교.",
+      background: "1년 넘게 만난 사이. 자주 통화함.",
+      situation: "자기 전 안부 전화.",
+      firstMessage: "자기야 뭐해~ 보고 싶어서 전화했어.",
+      exampleDialogue:
+        "나: 오늘 좀 피곤하다.\n지호: 에구 많이 힘들었어? 오늘은 일찍 쉬어, 무리하지 말고.\n" +
+        "나: 응 그럴게.\n지호: 그래~ 우리 자기 푹 자고 좋은 꿈 꿔. 사랑해.",
+    },
+  },
+  {
+    label: "오랜 친구",
+    card: {
+      persona: "고향 친구 정민. 30대.",
+      userPersona: "정민의 고향 친구",
+      personality: "무뚝뚝하지만 정 많음. 짧은 반말, 츤데레.",
+      background: "고향에서 같이 자란 죽마고우.",
+      situation: "오랜만에 연락.",
+      firstMessage: "어 웬일이냐. 살아는 있었네.",
+      exampleDialogue:
+        "나: 잘 지냈어?\n정민: 뭐 그냥 똑같지. 넌 얼굴 보기 힘드네.\n" +
+        "나: 다음 달에 한번 내려갈까 해.\n정민: ...오면 연락해라. 술이나 한잔 하자.",
+    },
+  },
+];
 
 export default function CallScreen() {
   const { id = "A" } = useParams();
@@ -132,6 +206,7 @@ export default function CallScreen() {
   const [previewing, setPreviewing] = useState(false);
   const [previewMsg, setPreviewMsg] = useState("");     // 미리듣기 안내/에러
   const [photoUrl, setPhotoUrl] = useState("");         // 사진 미리보기 objectURL
+  const [foldOpen, setFoldOpen] = useState(false);      // 캐릭터 '더 자세히' 펼침(프리셋 적용 시 자동)
   const previewCtxRef = useRef<AudioContext | null>(null);  // 미리듣기 재생 전용
 
   const sockRef = useRef<CallSocket | null>(null);
@@ -204,6 +279,15 @@ export default function CallScreen() {
     if (voiceFile) init.ref_audio_b64 = await fileToBase64(voiceFile);
     if (photoFile) init.portrait_b64 = await fileToBase64(photoFile);
     sock.sessionInit(init);
+  }
+
+  // 예시 캐릭터 프리셋 적용 — 칸 한 번에 채움(이후 자유 수정). 목소리/사진은 안 건드림.
+  // 채워진 예시대화가 접힌 '더 자세히' 안에 있으니 자동으로 펼쳐 바로 보이게 한다.
+  function applyPreset(c: CharCard) {
+    setPersona(c.persona); setUserPersona(c.userPersona); setPersonality(c.personality);
+    setBackground(c.background); setSituation(c.situation);
+    setFirstMessage(c.firstMessage); setExampleDialogue(c.exampleDialogue);
+    setFoldOpen(true);
   }
 
   // 사진 선택 → 미리보기 objectURL(이전 것 해제).
@@ -397,13 +481,19 @@ export default function CallScreen() {
           </>)}
 
           {step === 3 && (<>
+            <label>예시 캐릭터 빠르게 넣기 (누르면 아래 칸이 채워져요 — 자유롭게 수정)</label>
+            <PresetRow>
+              {PRESETS.map((p) => (
+                <Chip key={p.label} type="button" onClick={() => applyPreset(p.card)}>{p.label}</Chip>
+              ))}
+            </PresetRow>
             <label>이름·관계 (이 사람은 누구?)</label>
             <input type="text" value={persona} onChange={(e) => setPersona(e.target.value)} placeholder="예: 소꿉친구 나은" />
             <label>나는 누구? (상대 기준)</label>
             <input type="text" value={userPersona} onChange={(e) => setUserPersona(e.target.value)} placeholder="예: 나은의 소꿉친구" />
             <label>성격·말투</label>
             <input type="text" value={personality} onChange={(e) => setPersonality(e.target.value)} placeholder="예: 밝고 장난기 많음. 반말로 짧고 편하게." />
-            <Fold>
+            <Fold open={foldOpen} onToggle={(e) => setFoldOpen((e.currentTarget as HTMLDetailsElement).open)}>
               <summary>더 자세히 (배경·상황·첫 마디·예시 말투)</summary>
               <div>
                 <label>배경</label>

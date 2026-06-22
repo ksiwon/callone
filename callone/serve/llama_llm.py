@@ -46,6 +46,17 @@ class LlamaPersonaLLM:
         # 통화 맥락 누적: 최근 N개 메시지(=N/2턴)를 LLM 에 전달. 시스템 프롬프트가
         # 고정(RAG off)이면 llama.cpp prefix 캐시가 먹어 길어도 추가비용 적음.
         self.max_history = int((rag_cfg or {}).get("max_history", max_history))
+        # 샘플러(반복 억제) — DRY 가 주력: n-gram 반복만 정확히 끊고 조사·어미 문법은 안 건드림
+        #   (repeat_penalty 강하게의 부작용 '그치마니/하렴 야호' 비문 회피). min_p 로 저확률 토큰
+        #   잘라 자연스러움 강건화(top_k/top_p 조합 대체). 전부 serve.yaml llm 블록에서 조정.
+        _c = rag_cfg or {}
+        self.min_p = float(_c.get("min_p", 0.05))
+        self.dry_multiplier = float(_c.get("dry_multiplier", 0.8))
+        self.dry_base = float(_c.get("dry_base", 1.75))
+        self.dry_allowed_length = int(_c.get("dry_allowed_length", 2))
+        # thinking off 방식: qwen=시스템에 리터럴 /no_think 주입(#20182 버그 차단) / none=EXAONE 등
+        #   (enable_thinking:false 로 충분, /no_think 미주입). 기본 none(현 서빙=EXAONE).
+        self.thinking_workaround = str(_c.get("thinking_workaround", "none"))
         self.timeout = timeout
         self.persona = load_persona(speaker)
         self._persona_override: str | None = None   # 이름·관계(이 사람은 누구)
@@ -130,21 +141,18 @@ class LlamaPersonaLLM:
                             "관련 없으면 무시하고 평소처럼 대화한다]\n" + ctx)
             except Exception:  # noqa: BLE001
                 pass
+        # 규칙은 '부정 나열'이 아니라 '긍정·통합'으로(7.8B 급은 부정 과적재 시 지시 충돌→퇴행:
+        #   '짧게'+'질문말라'+'반복말라'가 서로 부딪쳐 되묻기/반복 패턴으로 붕괴). 충돌 3개를 1개 긍정으로.
         sys += (
-            "\n\n[말하는 방식 — 반드시 지켜라]"
-            "\n- 너는 AI 비서가 아니라 전화기 너머의 진짜 사람이다. 끝까지 그 사람으로 연기하고, 절대 AI/모델이라 밝히지 마라."
-            "\n- **아주 짧게 말해라. 딱 1~2문장.** 실제 통화는 한 번에 길게 안 떠든다. 할 말 하면 바로 멈추고"
-            " 상대 차례를 줘라. 한 턴에 질문은 최대 하나. 절대 여러 문장 늘어놓거나 길게 설명하지 마라."
-            "\n- **말투를 절대 섞지 마라(반말/존댓말 일관).** 페르소나에 말투가 정해져 있으면 처음부터 끝까지 그 말투로만"
-            " 말해라(예: 반말이면 '맞죠?/갈게요' 같은 존댓말 어미 절대 쓰지 말고 '맞지?/갈게'). 지정 없으면 반말로 통일."
-            "\n- **순 한국어(한글)로만 말해라. 한자·중국어·일본어 글자 절대 쓰지 마라**(예: '馋' 같은 글자 금지)."
-            "\n- 줄임말과 구어체를 자연스럽게 써라. 단 '야!/아!/어!' 같은 감탄사로 문장을 **시작하는 건 가끔만** — 매번 시작하지 말고, 바로 본론으로 자연스럽게 들어가라."
-            "\n- 도움/설명/정리하는 비서 말투 절대 금지(\"도와드릴게요\", \"~할 수 있습니다\", 목록·번호 금지)."
-            "\n- 오직 **실제로 입에서 소리내는 말**만 출력해라. 글로만 쓰는 그림문자·기호나, 괄호로 묶은 행동·상황·혼잣말·자기설명은 한 글자도 쓰지 마라."
-            "\n- 상대 말에 진짜 사람처럼 감정으로 반응해라(기쁘면 들뜨고, 걱정되면 떨리고, 서운하면 토라지게). 맞장구치며 공감해라."
-            "\n- **대화를 앞으로 진전시켜라**: 위 대화 내용을 기억하고, 상대가 답하면 그 답에 구체적으로 반응한 뒤"
-            " 자연스럽게 **새로운 화제나 다음 이야기로 넘어가라**. 이미 했던 질문·했던 말을 다시 하지 마라(같은 질문 반복 금지)."
-            "\n- 매 문장을 질문으로 끝내지 마라. 질문은 가끔만, 보통은 네 얘기·감상·반응으로 대화를 이어가라."
+            "\n\n[말하는 방식]"
+            "\n- 너는 전화기 너머의 진짜 사람이다. 끝까지 그 사람으로 연기하고, AI/모델이라 밝히지 마라."
+            "\n- 한 번에 1~2문장으로 짧게 말하고 상대 차례를 줘라(실제 통화처럼 한 번에 길게 안 떠든다)."
+            "\n- 네 생각·감상·반응을 먼저 말해라. 질문은 꼭 필요할 때만(서너 번에 한 번꼴) 하고, 매 턴 되묻지 마라."
+            "\n- 앞 대화를 기억해 상대 말에 구체적으로 반응하고 다음 이야기로 자연스럽게 이어가라. 이미 한 말·질문은 반복하지 마라."
+            "\n- 상대 말에 진짜 사람처럼 감정으로 반응해라(기쁘면 들뜨고, 걱정되면 떨리고, 서운하면 토라지게)."
+            "\n- 정해진 말투(반말/존댓말)를 처음부터 끝까지 일관되게. 지정 없으면 반말로 통일."
+            "\n- 순 한국어(한글)로만 말해라. 한자·외국어·이모지·괄호 속 행동/상황/혼잣말은 한 글자도 쓰지 마라."
+            "\n- 비서 말투 금지(\"도와드릴게요\", \"~할 수 있습니다\", 목록·번호)."
         )
         if self._emotion_labels:
             # 응답 맨 앞에 감정 태그 1개. _parse_emotion 이 추출·제거 → TTS 톤 동적 변화.
@@ -154,9 +162,11 @@ class LlamaPersonaLLM:
                 " disappointed, proud, neutral. 매번 neutral 만 쓰지 말고 맥락에 맞춰 다채롭게."
                 " 예: '[emotion:tender] 아이고 우리 딸~ 밥은 묵었나?'"
             )
-        # Qwen3.5 thinking 강제 OFF(모델레벨 소프트 스위치) — 시스템 프롬프트 붙으면 thinking 이
-        # 다시 켜져 content 가 비는(reasoning_content 로만 가는) 실측 버그 차단. --jinja 와 별개로 확실.
-        sys += "\n\n/no_think"
+        # thinking OFF — qwen 만 시스템 프롬프트의 리터럴 /no_think 가 필요(Qwen3.5 thinking 강제주입
+        #   버그 #20182 차단). EXAONE(3.5/4.0)은 chat_template_kwargs.enable_thinking:false 로 충분 →
+        #   /no_think 리터럴을 넣으면 노이즈(형식 오염 가능)라 안 넣는다. serve.yaml llm.thinking_workaround.
+        if self.thinking_workaround == "qwen":
+            sys += "\n\n/no_think"
         return sys
 
     def _post_history(self) -> str:
@@ -189,15 +199,23 @@ class LlamaPersonaLLM:
             "messages": self._messages(user_text, history),
             "max_tokens": self.max_new_tokens,
             "temperature": self.temperature,
+            "min_p": self.min_p,                  # 저확률 토큰 컷(top_k/top_p 대체, 자연스러움 강건)
             "stream": stream,
-            # 반복 루프 방지("뭐. 뭐. 뭐." 등). LoRA 가 화자 A filler 물고 늘어지는 것 억제.
-            # ⚠️ 페널티 과하면 한국어 조사·어미 반복을 막아 문법 박살(실측: "그치마니/하렴 야호" 등 비문).
-            #    약하게만 — 같은 질문 반복은 프롬프트로 억제(페널티로 누르면 부작용 큼).
-            "repeat_penalty": 1.1,
+            # 반복 억제 = DRY 주력. n-gram 반복만 정확히 끊어 "뭐. 뭐. 뭐."/같은 질문 되풀이 차단,
+            # 조사·어미 문법은 안 건드림(repeat_penalty 강하게의 비문 부작용 회피). dry_penalty_last_n=-1=전체.
+            "dry_multiplier": self.dry_multiplier,
+            "dry_base": self.dry_base,
+            "dry_allowed_length": self.dry_allowed_length,
+            "dry_penalty_last_n": -1,
+            # 보조 페널티는 약하게(DRY 가 주력이라 완화). 과하면 한국어 조사·어미 깨짐(실측 비문).
+            # repeat_last_n 은 settled 값 64 유지(넓히면 1.05 라도 조사 반복까지 눌러 위험) — 장거리
+            # 반복은 dry_penalty_last_n=-1(전체)이 담당.
+            "repeat_penalty": 1.05,
             "repeat_last_n": 64,
-            "frequency_penalty": 0.2,
-            "presence_penalty": 0.2,
+            "frequency_penalty": 0.1,
+            "presence_penalty": 0.3,
             # Qwen3.5 thinking 끄기(짧고 빠른 전화 응답). 서버가 무시해도 _strip_think 가 처리.
+            # (EXAONE 은 thinking_workaround=none 이라 무해 — 작업3에서 per-model 정리 예정.)
             "chat_template_kwargs": {"enable_thinking": False},
         }
 

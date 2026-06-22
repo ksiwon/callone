@@ -280,6 +280,24 @@ class Orchestrator:
                  t["asr_ms"], t["llm_ms"], t["tts_ms"], t["total_ms"])
         return t
 
+    def _warmup_avatar(self):
+        """아바타 첫 프레임 콜드(~30s, TRT 첫 추론) 은닉 — 통화 시작 '연결 중' 동안 더미 1s 무음으로
+        frames_for 1회(출력 폐기). 발화단위 setup→run→close 라이프사이클 그대로 1회 통과(누적 0,
+        커밋 f8d3261 의 OOM/thrashing 픽스 안 건드림). 턴 시작 전 단발이라 과거 '턴 중 워밍업'의
+        드레인 경쟁/타임아웃 문제 없음. 실패해도 통화는 계속(예외 안 던짐)."""
+        if self.avatar is None:
+            return
+        import numpy as _np
+
+        sr_out = getattr(self.tts, "sr", 24000)
+        t0 = time.time()
+        try:
+            for _ in self.avatar.frames_for(_np.zeros(int(1.0 * sr_out), dtype=_np.float32), sr_out):
+                pass   # 프레임 폐기 — TRT 첫 추론 그래프만 예열
+            log.info("아바타 워밍업 완료(%.0fms)", (time.time() - t0) * 1000)
+        except Exception as e:  # noqa: BLE001
+            log.warning("아바타 워밍업 스킵(%s)", e)
+
     def _default_portrait(self, speaker: str) -> str:
         """화자 폴더에서 증명사진 자동탐색(portrait.jpg/jpeg/png)."""
         for ext in ("jpg", "jpeg", "png"):
@@ -380,6 +398,7 @@ class Orchestrator:
                     except Exception:  # noqa: BLE001
                         pass
                 self.avatar = av
+                self._warmup_avatar()              # 첫 프레임 콜드(~30s, TRT)를 '연결 중' 구간으로 이동
             except Exception as e:  # noqa: BLE001
                 log.warning("세션 아바타 설정 실패(%s) — 영상 생략", e)
                 self.avatar = None

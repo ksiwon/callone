@@ -22,10 +22,17 @@ export HF_HOME="${HF_HOME:-$CALLONE_HOME/hf_cache}"
 export CALLONE_TIER="${CALLONE_TIER:-server_gpu}"
 export CALLONE_TTS_MODEL="${CALLONE_TTS_MODEL:-$CALLONE_HOME/models/qwen3_tts}"
 SPK="${SPK:-sis}"
-# LLM: EXAONE-3.5-7.8B(LG 한국어 특화 모델). 한국어 자연스러움↑, 4090(24GB)도 가뿐. env 로 교체 가능.
+# LLM: EXAONE-3.5-7.8B(LG 한국어 특화, abliterated 무검열) — 검증된 기본(두 GPU 다 동작). env 로 교체.
+#   ⚠️ 32B 자동전환 안 함(repo명 미검증 + 사용자 결정=벤치 후). A100/H100 이면 아래 힌트만 출력 →
+#   scripts/bench_llm_korean.py 로 EXAONE-4.0-32B-abliterated vs 7.8B A/B 후, 이기면 수동으로:
+#     LLM_REPO=<32B GGUF repo> LLM_GLOB='*Q5_K_M*.gguf' LLM_DIR=$CALLONE_HOME/models/llm_exaone4_32b bash scripts/bootstrap_gpu.sh
 LLM_REPO="${LLM_REPO:-AetherArchitectural/EXAONE-3.5-7.8B-Instruct-abliterated-GGUF-ARM-Imatrix-Community}"
 LLM_GLOB="${LLM_GLOB:-*Q6_K*.gguf}"
 LLM_DIR="${LLM_DIR:-$CALLONE_HOME/models/llm_exaone}"
+VRAM_GB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | awk '{print int($1/1024)}')"
+if [ "${VRAM_GB:-0}" -ge 40 ] && [ -z "${LLM_REPO_FORCED:-}" ]; then
+  echo "[LLM] VRAM ${VRAM_GB}GB — 32B 여유. 기본=7.8B(검증). 32B 쓰려면 bench 후 LLM_REPO 로 교체(위 주석)."
+fi
 TTS_REPO="Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 LBIN="$CALLONE_HOME/llama.cpp/build/bin/llama-server"
 NOTHINK_TMPL="$PWD/configs/qwen3_nothink.jinja"   # Qwen3.5 thinking 강제 OFF 템플릿(빈 think 프리필)

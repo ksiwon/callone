@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import struct
 import urllib.error
 import urllib.request
 from typing import Iterator
@@ -30,6 +31,17 @@ from ..common.logging import get_logger
 log = get_logger("tts_cosyvoice")
 
 
+def _read_exactly(resp, n: int) -> bytes:
+    """HTTP 스트림 본문에서 정확히 n바이트 모아 읽음(소켓 부분수신 대비). EOF 면 모인 만큼 반환."""
+    buf = b""
+    while len(buf) < n:
+        chunk = resp.read(n - len(buf))
+        if not chunk:
+            break
+        buf += chunk
+    return buf
+
+
 class CosyVoiceTTS:
     def __init__(self, speaker: str, cfg: dict | None = None):
         self.speaker = speaker
@@ -38,6 +50,9 @@ class CosyVoiceTTS:
         self.base_url = str(scfg.get("cosyvoice_url")
                             or os.environ.get("COSYVOICE_URL", "http://127.0.0.1:8092")).rstrip("/")
         self.language = str(scfg.get("language", "Korean"))
+        # stream=True → 서버 /synth_stream(네이티브 bistream, 첫음성 ~150ms). false → /synth(통짜, 기준선).
+        #   음색은 동일 연속 생성이나 우선순위①(목소리)이라 저장 wav A/B 통과 전엔 false 권장.
+        self.stream = bool(scfg.get("stream", True))
         self.timeout = float(scfg.get("cosyvoice_timeout", 60.0))
         self.ref_asr_model = str(load_config("tts_server").get("ref_transcribe_model", "small"))
         # 인메모리 레퍼런스(디스크 0). ref_wav 는 orchestrator 워밍업 게이트용 truthy 마커.
@@ -45,6 +60,7 @@ class CosyVoiceTTS:
         self._ref_sr: int = 16000
         self.ref_text: str = ""
         self.ref_wav: str = ""                # set_reference 후 "memory" 로 채워짐(존재 신호)
+        self._cur_text: str = ""              # synth_stream 진입 시 세팅(_payload 공용)
         self._probe()
         log.info("CosyVoice3 TTS: %s (speaker=%s, lang=%s)", self.base_url, speaker, self.language)
 
@@ -104,7 +120,16 @@ class CosyVoiceTTS:
             log.warning("ref 전사 실패(%s) — 빈 ref_text(품질 저하 가능)", e)
             return ""
 
-    # ----- 합성: 서버에 통째 요청(stream=False) 후 청크로 흘림 --------------
+    def _payload(self) -> bytes:
+        return json.dumps({
+            "text": self._cur_text,
+            "ref_audio_b64": self._ref_b64,
+            "ref_sr": self._ref_sr,
+            "prompt_text": self.ref_text,
+            "language": self.language,
+        }).encode()
+
+    # ----- 합성: stream=True 면 /synth_stream(나오는 대로), 아니면 /synth(통짜) -----
     def synth_stream(self, text: str, chunk_ms: int = 200,
                      emotion: str | None = None) -> Iterator[np.ndarray]:
         if not text.strip():
@@ -112,15 +137,49 @@ class CosyVoiceTTS:
         if not self._ref_b64:
             log.warning("CosyVoice3: 레퍼런스 없음 — 합성 생략")
             return
-        payload = json.dumps({
-            "text": text.strip(),
-            "ref_audio_b64": self._ref_b64,
-            "ref_sr": self._ref_sr,
-            "prompt_text": self.ref_text,
-            "language": self.language,
-        }).encode()
+        self._cur_text = text.strip()
+        if self.stream:
+            yield from self._synth_stream_live()
+        else:
+            yield from self._synth_whole(chunk_ms)
+
+    def _synth_stream_live(self) -> Iterator[np.ndarray]:
+        """서버 /synth_stream 의 [4바이트 LE 길이][f32 PCM] 프레임을 나오는 대로 yield(첫음성 ~150ms)."""
         req = urllib.request.Request(
-            f"{self.base_url}/synth", data=payload,
+            f"{self.base_url}/synth_stream", data=self._payload(),
+            headers={"Content-Type": "application/json"})
+        r = None
+        try:
+            r = urllib.request.urlopen(req, timeout=self.timeout)
+            out_sr = int(r.headers.get("X-Sample-Rate", self.sr))
+            while True:
+                head = _read_exactly(r, 4)
+                if not head:
+                    break
+                (n,) = struct.unpack("<I", head)
+                body = _read_exactly(r, n)
+                if len(body) < n:
+                    break
+                audio = np.frombuffer(body, dtype=np.float32)
+                if out_sr != self.sr:
+                    audio = self._resample(audio, out_sr, self.sr)
+                yield audio
+        except urllib.error.HTTPError as e:
+            log.warning("CosyVoice3 stream HTTP %s: %s", e.code, e.read().decode("utf-8", "ignore")[:200])
+        except Exception as e:  # noqa: BLE001
+            log.warning("CosyVoice3 stream 오류(%s)", e)
+        finally:
+            # barge-in 으로 제너레이터가 중간에 버려지면(GeneratorExit) 여기로 와 소켓 확실히 닫음(누수 방지).
+            if r is not None:
+                try:
+                    r.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _synth_whole(self, chunk_ms: int = 200) -> Iterator[np.ndarray]:
+        """통짜 합성(/synth, stream=False) — A/B 기준선·폴백. 받은 전체를 chunk_ms 단위로 흘림."""
+        req = urllib.request.Request(
+            f"{self.base_url}/synth", data=self._payload(),
             headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
@@ -135,7 +194,6 @@ class CosyVoiceTTS:
         audio = np.frombuffer(raw, dtype=np.float32)
         if out_sr != self.sr:
             audio = self._resample(audio, out_sr, self.sr)
-        # 통째 오디오를 ~chunk_ms 단위로 흘려 프론트 스케줄러가 부드럽게 재생(첫음성도 빨리 시작).
         step = max(1, int(self.sr * chunk_ms / 1000))
         for i in range(0, len(audio), step):
             yield audio[i:i + step]

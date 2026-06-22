@@ -31,13 +31,24 @@ llm:
   base_url: "http://127.0.0.1:8090"   # llama-server 주소(Elice 가 8080 점유 → 8090 기본. bootstrap 이 PORT 로 동기)
   config: llm_laptop           # llm_server(서버 EXAONE-3.5-7.8B) | llm_laptop(노트북 EXAONE-3.5-2.4B)
   enable_thinking: false       # §1-3: 대화용 thinking 비활성(응답 지연 억제)
+  # thinking off 방식: none=EXAONE(enable_thinking:false 로 충분, /no_think 미주입) /
+  #   qwen=Qwen3.5 만(시스템에 리터럴 /no_think 주입해 thinking 강제주입 버그 #20182 차단).
+  #   현 서빙=EXAONE → none. Qwen 계열로 바꾸면 qwen.
+  thinking_workaround: none
   # 기억 회상: extract_memories.py 로 memories.json 만든 뒤 true 권장(의미검색=삼천포 없음).
   use_rag: false               # 사실 추출 후 true 로
   embedder: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # fastembed 지원본(한국어 OK)
   rag_min_score: 0.45          # 게이트(MiniLM 기준): 미만이면 기억 안 씀. 허위회상 잦으면 ↑, 회상 약하면 ↓
-  temperature: 0.4             # 실측(EXAONE-3.5-7.8B): 0.7 은 한국어 비문 잦음 → 0.4 가 문법 안정. 더 생생하게는 ↑(품질 trade)
-  top_p: 0.8
+  temperature: 0.4             # 실측(EXAONE-3.5-7.8B): 0.7=비문 잦음, 0.4=문법 안정. 반복은 temp 가 아니라
+                               # DRY+프롬프트로 잡으므로 0.4 유지(변수 격리). 더 생생하게는 0.5~0.6 A/B(비문 trade).
+  top_p: 0.8                   # ⚠️ 참고: 현재 _payload 는 top_p/top_k 를 안 보냄(미사용). 샘플링=temperature+min_p+DRY.
   top_k: 20
+  # 반복/되묻기 억제(작업2) — DRY 샘플러가 주력. n-gram 반복만 끊고 한국어 문법은 안 건드림.
+  #   페널티 강하게의 부작용("그치마니/하렴 야호" 비문) 없이 "같은 질문 반복"·"뭐.뭐.뭐." 차단.
+  min_p: 0.05                  # 저확률 토큰 컷(top_k/top_p 보조) — 자연스러움 강건
+  dry_multiplier: 0.8          # 0=off. 반복 더 세게 막으려면 ↑(과하면 정상 반복어구도 회피)
+  dry_base: 1.75
+  dry_allowed_length: 2        # 이 길이까지의 n-gram 반복은 허용(2=짧은 반복만 봐줌)
   max_new_tokens: 96           # 160 은 모델이 다 채우려 주절대다 끝에서 잘림. 96 + 강한 '1~2문장' 프롬프트로
                                # 짧게 끝나게(통화감↑·합성 빨라짐). 짧은 답이라 96 안에서 자연히 EOS.
   # 통화 맥락 누적: LLM 에 넘길 최근 메시지 수(=N/2턴). 24=12턴. 통화가 길게 이어져도
@@ -49,7 +60,10 @@ tts:
   # 별 프로세스(:8092, conda env) — setup_cosyvoice_gpu.sh. 서버 다운이면 qwen3-tts 자동 폴백.
   backend: cosyvoice3          # cosyvoice3 | qwen3-tts | piper | kokoro
   cosyvoice_url: "http://127.0.0.1:8092"
-  stream: true
+  # 작업1 TTS 스트리밍: true=서버 /synth_stream(네이티브 bistream, 첫음성 ~1.3s→~0.3s).
+  #   ⚠️ 우선순위①(목소리)이라 **기본 false**(통짜 /synth=현 동작). 박스에서 저장 wav A/B 로 통짜 vs
+  #   스트리밍 음색 동일 확인 + 라이브 끊김 없음 확인 후에만 true 로(메모리 'A/B 통과 전 라이브 금지').
+  stream: false
   first_chunk_target_ms: 500   # 실측(A100): chunk_size=15 → 워밍업 후 첫청크 ~0.5s
   # ⚠️ 첫음성 지연의 최대 단일 병목. A100 A/B(2026-06-20): cs 25→776ms·20→637·15→501·10→366ms.
   # 음색은 cs 줄여도 거의 불변(사용자 귀 판정) → 15 채택(첫음성 1.64s→~1.29s). 더 줄이려면 10까지
