@@ -25,6 +25,7 @@ import queue
 import sys
 import tempfile
 import threading
+import time
 
 import numpy as np
 
@@ -141,15 +142,20 @@ class DittoModel(AvatarModel):
         dummy_out = os.path.join(base, f"ditto_out_{os.getpid()}.mp4")  # 안 쓰임(writer 가로채기)
         sink = _FrameSink()
         num_f = 0
-        with self._lock:                        # 발화 단위 setup+run (턴은 순차 처리라 경합 없음)
+        t_setup = t_feed = 0.0            # 계측(작업4-C): 어디서 시간 먹는지 분해 — setup(소스 전처리) vs
+        with self._lock:                  #   feed(run_chunk 제출) vs drain(워커 추론) vs close(정리).
             try:
+                ts = time.time()
                 try:
                     self.sdk.setup(src_path, dummy_out, online_mode=True)
                 except Exception:               # noqa: BLE001  close() 후 재setup 불가 상태면
                     self.sdk = self._SDK_cls(self._cfg_pkl, self._data_root)  # SDK 1회 재생성(모델 재로드 수초)
                     self.sdk.setup(src_path, dummy_out, online_mode=True)
+                t_setup = time.time() - ts
                 self.sdk.writer = sink          # [V] attr 명 self.writer — 파일 대신 우리 큐로
+                tf = time.time()
                 num_f = self._feed(self.sdk, a)
+                t_feed = time.time() - tf
             finally:
                 for p in (src_path, dummy_out):  # 사진·더미 즉시 삭제
                     try:
@@ -158,6 +164,7 @@ class DittoModel(AvatarModel):
                         pass
         # 워커가 비동기로 num_f 프레임 생성 → 모일 때까지 drain. 첫 프레임은 콜드(TRT 첫추론 ~수십초)라
         # 아주 길게(90s), 이후는 짧게(2s). (클라 WS 타임아웃도 이보다 커야 함 — avatar.py)
+        td = time.time()
         got = 0
         while got < num_f:
             try:
@@ -168,12 +175,20 @@ class DittoModel(AvatarModel):
                 break
             got += 1
             yield _jpeg(fr, self.resolution)
+        t_drain = time.time() - td
         # 발화 종료: close()로 워커/내부버퍼 정리 → 다음 발화 누적 0(멀티턴 thrashing 차단).
+        tc = time.time()
         with self._lock:
             try:
                 self.sdk.close()
             except Exception:  # noqa: BLE001
                 pass
+        t_close = time.time() - tc
+        dur = len(a) / 16000.0
+        total = t_setup + t_feed + t_drain + t_close
+        print(f"[ditto-timing] setup {t_setup*1000:.0f} + feed {t_feed*1000:.0f} + "
+              f"drain {t_drain*1000:.0f} + close {t_close*1000:.0f} = {total*1000:.0f}ms | "
+              f"{got}/{num_f}f, audio {dur:.1f}s, RTF {total/max(dur,0.01):.2f}", flush=True)
 
     def stop(self) -> None:
         self._image_bytes = None
