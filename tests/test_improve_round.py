@@ -2,7 +2,7 @@
 
 GPU 첫 세션이 버그를 처음 만나는 곳이 되지 않게, 무-GPU로 검증 가능한 로직을 잠근다:
   1) 작업2 샘플러: _payload 에 DRY/min_p, repeat_last_n=64(settled). config 로 조정됨.
-  2) 작업3 thinking 게이트: 기본 none=/no_think 미주입, qwen 만 주입.
+  2) 작업3 EXAONE 프롬프트: /no_think 같은 타 모델 토큰 미주입.
   3) 작업1 TTS 프레이밍: [4B LE 길이][f32 PCM] 서버 인코딩 ↔ 클라 파서 라운드트립 + 부분수신.
   4) 작업4-A 아바타 워밍업: 더미 1s 오디오로 frames_for 1회 호출(없으면 무동작).
 """
@@ -48,16 +48,10 @@ def test_prompt_conflict_rule_consolidated():
     assert "매 문장을 질문으로 끝내지 마라" not in sysmsg  # 옛 충돌 규칙 제거됨
 
 
-# ----- 작업3: thinking_workaround 게이트 -------------------------------------
-def test_thinking_workaround_default_none_no_nothink():
+# ----- 작업3: EXAONE 프롬프트 -----------------------------------------------
+def test_exaone_prompt_has_no_foreign_nothink_token():
     sysmsg = LlamaPersonaLLM("test", use_rag=False, probe=False)._system("안녕")
     assert "/no_think" not in sysmsg                   # EXAONE 기본: 리터럴 미주입
-
-
-def test_thinking_workaround_qwen_injects_nothink():
-    llm = LlamaPersonaLLM("test", use_rag=False, probe=False,
-                          rag_cfg={"thinking_workaround": "qwen"})
-    assert "/no_think" in llm._system("안녕")           # qwen 만 주입(#20182 차단)
 
 
 # ----- 작업1: TTS 스트리밍 프레이밍 [4B LE len][f32 PCM] ---------------------

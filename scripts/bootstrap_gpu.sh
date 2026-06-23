@@ -20,22 +20,28 @@ if [ -d /workspace ] && [ -w /workspace ]; then export CALLONE_HOME="${CALLONE_H
 else export CALLONE_HOME="${CALLONE_HOME:-$HOME}"; fi
 export HF_HOME="${HF_HOME:-$CALLONE_HOME/hf_cache}"
 export CALLONE_TIER="${CALLONE_TIER:-server_gpu}"
-export CALLONE_TTS_MODEL="${CALLONE_TTS_MODEL:-$CALLONE_HOME/models/qwen3_tts}"
 SPK="${SPK:-sis}"
-# LLM: EXAONE-3.5-7.8B(LG 한국어 특화, abliterated 무검열) — 검증된 기본(두 GPU 다 동작). env 로 교체.
-#   ⚠️ 32B 자동전환 안 함(repo명 미검증 + 사용자 결정=벤치 후). A100/H100 이면 아래 힌트만 출력 →
-#   scripts/bench_llm_korean.py 로 EXAONE-4.0-32B-abliterated vs 7.8B A/B 후, 이기면 수동으로:
-#     LLM_REPO=<32B GGUF repo> LLM_GLOB='*Q5_K_M*.gguf' LLM_DIR=$CALLONE_HOME/models/llm_exaone4_32b bash scripts/bootstrap_gpu.sh
-LLM_REPO="${LLM_REPO:-AetherArchitectural/EXAONE-3.5-7.8B-Instruct-abliterated-GGUF-ARM-Imatrix-Community}"
-LLM_GLOB="${LLM_GLOB:-*Q6_K*.gguf}"
-LLM_DIR="${LLM_DIR:-$CALLONE_HOME/models/llm_exaone}"
+# LLM 확정(2026-06-23):
+#   >=40GB(A100/H100) = EXAONE-4.0-32B-abliterated Q6_K
+#   <40GB(4090/3090)  = EXAONE-3.5-7.8B-abliterated Q6_K (32B Q6_K 약 26.4GB라 동시구동 불가)
+# LLM_REPO/LLM_GLOB/LLM_DIR env 를 주면 자동선택보다 우선한다.
 VRAM_GB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | awk '{print int($1/1024)}')"
-if [ "${VRAM_GB:-0}" -ge 40 ] && [ -z "${LLM_REPO_FORCED:-}" ]; then
-  echo "[LLM] VRAM ${VRAM_GB}GB — 32B 여유. 기본=7.8B(검증). 32B 쓰려면 bench 후 LLM_REPO 로 교체(위 주석)."
+if [ "${VRAM_GB:-0}" -ge 40 ]; then
+  DEFAULT_LLM_REPO="mradermacher/Huihui-EXAONE-4.0-32B-abliterated-GGUF"
+  DEFAULT_LLM_GLOB="*Q6_K*.gguf"
+  DEFAULT_LLM_DIR="$CALLONE_HOME/models/llm_exaone4_32b"
+  DEFAULT_LLM_LABEL="EXAONE-4.0-32B-abliterated Q6_K"
+else
+  DEFAULT_LLM_REPO="AetherArchitectural/EXAONE-3.5-7.8B-Instruct-abliterated-GGUF-ARM-Imatrix-Community"
+  DEFAULT_LLM_GLOB="*Q6_K*.gguf"
+  DEFAULT_LLM_DIR="$CALLONE_HOME/models/llm_exaone"
+  DEFAULT_LLM_LABEL="EXAONE-3.5-7.8B-abliterated Q6_K"
 fi
-TTS_REPO="Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+LLM_REPO="${LLM_REPO:-$DEFAULT_LLM_REPO}"
+LLM_GLOB="${LLM_GLOB:-$DEFAULT_LLM_GLOB}"
+LLM_DIR="${LLM_DIR:-$DEFAULT_LLM_DIR}"
+echo "[LLM] VRAM ${VRAM_GB:-unknown}GB → ${DEFAULT_LLM_LABEL} (repo=$LLM_REPO)"
 LBIN="$CALLONE_HOME/llama.cpp/build/bin/llama-server"
-NOTHINK_TMPL="$PWD/configs/qwen3_nothink.jinja"   # Qwen3.5 thinking 강제 OFF 템플릿(빈 think 프리필)
 # 프리빌트 llama-server(미리 빌드해 HF 에 올려둔 것). 기본으로 받아 **컴파일 생략**.
 #   다른 이미지(CUDA/glibc 불일치)면 실행검사 실패 → 자동 컴파일 폴백(아래 [2/5]).
 #   강제로 직접 컴파일하려면:  LLAMA_SERVER_URL= bash scripts/bootstrap_gpu.sh  (빈 값)
@@ -45,8 +51,7 @@ echo "== callone GPU bootstrap =="
 echo "   CALLONE_HOME=$CALLONE_HOME  speaker=$SPK"
 
 # bashrc 에 env 고정(중복 안 쌓이게 idempotent)
-for kv in "CALLONE_HOME=$CALLONE_HOME" "HF_HOME=$HF_HOME" "CALLONE_TIER=$CALLONE_TIER" \
-          "CALLONE_TTS_MODEL=$CALLONE_TTS_MODEL"; do
+for kv in "CALLONE_HOME=$CALLONE_HOME" "HF_HOME=$HF_HOME" "CALLONE_TIER=$CALLONE_TIER"; do
   grep -q "export ${kv%%=*}=" ~/.bashrc 2>/dev/null || echo "export $kv" >> ~/.bashrc
 done
 
@@ -117,10 +122,6 @@ if [ -z "$GGUF" ]; then
     || .venv-serve/bin/python -c "from huggingface_hub import snapshot_download as d; d('$LLM_REPO', local_dir='$LLM_DIR', allow_patterns=['$LLM_GLOB'])"
   GGUF="$(ls "$LLM_DIR"/$LLM_GLOB 2>/dev/null | head -1)"
 else echo "[3/5] LLM GGUF 있음 → 스킵 ($GGUF)"; fi
-if [ ! -f "$CALLONE_HOME/models/qwen3_tts/config.json" ]; then
-  echo "[3/5] TTS 모델 다운로드(4.5GB)..."
-  huggingface-cli download "$TTS_REPO" --local-dir "$CALLONE_HOME/models/qwen3_tts"
-else echo "[3/5] TTS 모델 있음 → 스킵"; fi
 
 # ── 4. 화자 참조음성 체크(경고만 — 개인음성이라 자동다운 불가) ───────────
 if [ -f "data/speakers/$SPK/ref_24k.wav" ] && [ -f "data/speakers/$SPK/ref_text.txt" ]; then
@@ -134,16 +135,8 @@ fi
 _health() { curl -s "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q '"status"'; }
 _start_verify() {   # 0=정상 / 2=CUDA에러 / 1=기타실패
   pkill -f llama-server 2>/dev/null; sleep 2
-  # Qwen3.5 thinking 강제 OFF: 모델 임베디드 템플릿이 <think> 강제주입 → enable_thinking:false/
-  #   --reasoning-budget 0 무시되는 llama.cpp 버그(#20182) → content 빔. 우리 no-think 템플릿(빈 think
-  #   프리필)으로 교체하면 모델이 바로 답변 → content 참. 템플릿 없으면 --reasoning-budget 0 로 폴백.
-  # 기본: 모델 임베디드 템플릿(EXAONE 등은 자체 ChatML 형식). Qwen3.5 만 thinking 버그(#20182)로
-  #   no-think 템플릿 필요 → GGUF 이름이 Qwen3 일 때만 적용(EXAONE 에 적용하면 형식 깨짐).
+  # EXAONE GGUF의 내장 chat template을 사용한다.
   TMPL_ARG="--jinja"
-  case "$(basename "$GGUF")" in
-    *[Qq]wen3*) [ -f "$NOTHINK_TMPL" ] && TMPL_ARG="--jinja --chat-template-file $NOTHINK_TMPL" \
-                  || TMPL_ARG="--jinja --reasoning-budget 0" ;;
-  esac
   echo "    LLM 템플릿: $TMPL_ARG  (GGUF=$(basename "$GGUF"))"
   nohup "$LBIN" -m "$GGUF" --host 127.0.0.1 --port "$PORT" \
     -c 8192 -n 512 --n-gpu-layers 99 $TMPL_ARG > "$CALLONE_HOME/llama.log" 2>&1 &

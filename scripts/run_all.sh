@@ -36,7 +36,7 @@ elif [ -d "$HOME/CosyVoice" ] && (source "$(conda info --base 2>/dev/null || ech
   echo "[cosy] cosyvoice-server 기동(:8092, 모델로드 ~30s)..."
   nohup bash scripts/setup_cosyvoice_gpu.sh run > "$LOG/cosyvoice.log" 2>&1 &
 else
-  echo "[cosy] cosyvoice env 없음 → TTS 는 Qwen3-TTS 폴백(scripts/setup_cosyvoice_gpu.sh 로 설치 권장)."
+  echo "[cosy] cosyvoice env 없음 → TTS 는 Piper/Kokoro 폴백(scripts/setup_cosyvoice_gpu.sh 로 설치 권장)."
 fi
 
 # ② avatar-server (.venv-avatar)

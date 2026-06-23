@@ -1,6 +1,8 @@
 # callone 사용 가이드
 
 ## 🚀 처음 세팅(권장) → **[FRESH_SETUP.md](FRESH_SETUP.md)**
+
+현재 확정 스택·남은 검증은 **[CURRENT_STATUS.md](CURRENT_STATUS.md)**.
 새 GPU 인스턴스에서 클론 → 스크립트 3개 → 실행까지 한 번에. 제로샷(5~10초 음성+사진) 영상통화는 이거 하나면 끝.
 
 상위 개요·두 가지 사용방식(제로샷 vs 풀튜닝)·두 GPU(A100/4090)는 [최상위 README](../README.md).
@@ -12,7 +14,7 @@
 | 하고 싶은 것 | 문서 |
 |---|---|
 | **새 인스턴스 세팅 + 제로샷 영상통화** | [FRESH_SETUP.md](FRESH_SETUP.md) |
-| 토킹헤드(Ditto) 상세·문제해결 | [AVATAR_RUN.md](AVATAR_RUN.md), [avatar_talking_head_design.md](avatar_talking_head_design.md) |
+| 토킹헤드(Ditto) 실행·문제해결 | [AVATAR_RUN.md](AVATAR_RUN.md) |
 
 ### 풀 파인튜닝(고급, mode B) — 긴 녹음으로 화자 학습
 긴 통화 녹음(1시간+)에서 화자를 분리하고 목소리·말투를 **학습**하는 경로. 제로샷보다 무겁지만 충실도↑.

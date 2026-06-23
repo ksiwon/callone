@@ -1,6 +1,6 @@
 """test_avatar_server — avatar-server(static) ↔ DittoAvatar 클라이언트 전체 WS 파이프라인(GPU 없이).
 
-Ditto/MuseTalk 가 들어가기 전에 **HTTP/WS 배관 자체**가 도는지 검증한다(설계서 §3 통합).
+Ditto를 붙이기 전에 **HTTP/WS 배관 자체**가 도는지 검증한다(설계서 §3 통합).
 실제 uvicorn 서버를 스레드로 띄우고, callone 쪽 DittoAvatar 로 사진 등록→오디오청크→프레임 수신.
 """
 import io

@@ -20,6 +20,6 @@ callone-llm-sft     --speakers "$SPK"
 
 echo "[callone] 데이터 파이프라인 완료. 다음: 학습 단계(H100)"
 echo "  callone-correct --hours 3   # ASR 교정셋 → 수동 교정 → callone-asr-train"
-echo "  callone-tts-train  --speakers $SPK"
+echo "  bash scripts/setup_piper_gpu.sh   # 목소리 학습(Piper)"
 echo "  callone-llm-train  --config llm_server --speakers $SPK"
 echo "  callone-serve                # 실시간 서버"

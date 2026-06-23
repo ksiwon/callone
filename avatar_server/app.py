@@ -1,6 +1,6 @@
 """avatar-server — 토킹헤드 별도 프로세스(설계서 §2-2). callone 서빙과 분리.
 
-왜 별 프로세스: Ditto/MuseTalk 은 자체 diffusers/mmcv/torch 스택 → callone 서빙 venv
+왜 별 프로세스: Ditto는 자체 TensorRT/torch 스택 → callone 서빙 venv
 (transformers==4.57.3 하드핀)과 충돌 → llama-server 와 동일하게 **별 venv·별 프로세스**로
 띄우고 HTTP/WS 로만 호출(서빙 파이썬엔 토킹헤드 의존성 0).
 
@@ -12,13 +12,13 @@
   POST /session/{id}/stop
 
 백엔드(_pick_model, callone _pick_avatar 와 동형):
-  Ditto/MuseTalk(GPU, 자리만) → StaticModel(정지사진, CPU — 모델 없이 전체 파이프라인 검증).
+  Ditto(GPU) → StaticModel(정지사진, CPU — 모델 없이 전체 파이프라인 검증).
 
 설계 교훈 반영(PunithVT/ai-avatar-system, 2026-03):
   - 모델은 **프로세스 시작 시 1회 로드(persistent)** → 첫 요청 콜드 제거.
   - **오디오 duration 이 프레임 수 결정**(fps 가 아니라). 사진 전처리는 모델 내부(원본 그대로 넘김).
 
-기동: AVATAR_BACKEND=static python -m avatar_server   (GPU: ditto|musetalk, 별 venv)
+기동: AVATAR_BACKEND=static python -m avatar_server   (GPU: ditto, 별 venv)
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ class AvatarModel:
 class StaticModel(AvatarModel):
     """정지사진 백엔드(CPU) — 모델 없이 전체 WS 파이프라인 검증용. 움직임 없음.
 
-    Ditto/MuseTalk 가 들어오면 _pick_model 이 대신 잡는다. 오디오 duration × fps 만큼 같은 프레임 emit."""
+    Ditto가 들어오면 _pick_model 이 대신 잡는다. 오디오 duration × fps 만큼 같은 프레임 emit."""
 
     name = "static"
 
@@ -92,7 +92,7 @@ def _to_jpeg(image_bytes: bytes, resolution: int) -> bytes:
 
 
 def _pick_model() -> AvatarModel:
-    """AVATAR_BACKEND=ditto|musetalk|static. GPU 백엔드는 import 실패 시 static 폴백."""
+    """AVATAR_BACKEND=ditto|static. Ditto import 실패 시 static 폴백."""
     backend = os.environ.get("AVATAR_BACKEND", "static").lower()
     if backend == "ditto":
         try:
@@ -101,13 +101,6 @@ def _pick_model() -> AvatarModel:
             return DittoModel()
         except Exception as e:  # noqa: BLE001
             print(f"[avatar] Ditto 로드 실패({e}) — static 폴백")
-    elif backend == "musetalk":
-        try:
-            from .backends.musetalk_model import MuseTalkModel  # type: ignore
-
-            return MuseTalkModel()
-        except Exception as e:  # noqa: BLE001
-            print(f"[avatar] MuseTalk 로드 실패({e}) — static 폴백")
     return StaticModel()
 
 

@@ -72,7 +72,8 @@ export default function ProcessingView() {
         <Sub>녹음을 <code>data/raw/</code>에 넣고 학습 → 학습된 화자로 통화하면 끝.</Sub>
         <Code>{`# 1) 데이터 처리 + 화자 학습(풀튜닝)
 bash scripts/setup_train.sh        # 최초 1회: 학습 환경
-bash scripts/run_full.sh           # 전 단계 파이프라인(처리→학습)
+bash scripts/run_full.sh           # 전 단계 데이터셋 생성
+# 목소리 학습은 docs/5_화자A_목소리_학습.md
 
 # 2) 서비스 기동 후 통화 화면에서 학습된 화자 선택
 bash scripts/run_all.sh            # llama/cosyvoice/avatar/serve`}</Code>

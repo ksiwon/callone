@@ -17,7 +17,5 @@ callone-llm-sft     --speakers A B
 
 echo "[callone] 전량 데이터셋 완료. 화자별 학습:"
 echo "  callone-asr-train"
-echo "  callone-tts-train  --speakers A B"
-echo "  callone-tts-phone  --speakers A B"
+echo "  bash scripts/setup_piper_gpu.sh   # 목소리 학습(Piper)"
 echo "  callone-llm-train  --config llm_server --speakers A B"
-echo "  callone-llm-train  --config llm_phone  --speakers A B"

@@ -1,4 +1,4 @@
-"""S7+ 토킹헤드(사진→움직이는 얼굴) 추상화 — docs/avatar_talking_head_design.md.
+"""S7+ 토킹헤드(사진→움직이는 얼굴) 추상화 — docs/AVATAR_RUN.md.
 
 증명사진 1장 + 통화 TTS 음성 → 입·표정·고개가 움직이는 영상 프레임(JPEG).
 음성 스택과 동일 철학: **무거운 모델 미설치/저사양이면 정지사진으로 안전 폴백**.
@@ -6,8 +6,7 @@
 
 백엔드 선택(_pick_avatar, _pick_tts 와 동형 폴백 체인):
   1) DittoAvatar   — 별도 프로세스 avatar-server(Ditto, GPU)에 HTTP/WS 로 호출.
-  2) (후속) MuseTalk
-  3) StaticImageAvatar — 사진 한 장을 그대로 프레임으로(움직임 없음). 모델/서버 없을 때.
+  2) StaticImageAvatar — 사진 한 장을 그대로 프레임으로(움직임 없음). 모델/서버 없을 때.
 
 인터페이스(모든 백엔드 공통):
   - start_call(image_path)              통화당 1회: 사진 등록(identity 사전추출은 서버 몫)
@@ -264,5 +263,4 @@ def _pick_avatar(serve_cfg: dict | None = None) -> AvatarBackend:
             log.warning("DittoAvatar 불가(%s) — StaticImage 폴백", e)
             if backend == "ditto":
                 return StaticImageAvatar(acfg)
-    # (후속) MuseTalk 자리
     return StaticImageAvatar(acfg)

@@ -1,7 +1,7 @@
 """S6 LLM 추론 서버 (§16).
 
 티어 자동 선택(common/hardware):
-  - server_gpu(H100) → llama.cpp/vLLM(EXAONE-3.5-7.8B + LoRA)  [llm_server.yaml]
+  - server_gpu(A100/H100) → llama.cpp(EXAONE-4.0-32B; 24GB GPU는 3.5-7.8B)  [llm_server.yaml]
   - laptop_cpu → OpenVINO/llama.cpp(EXAONE-3.5-2.4B + LoRA)  [llm_laptop.yaml]
 페르소나 프롬프트 + RAG + 메모리 결합. 미설치 시 규칙 기반 폴백 응답(지연 측정용).
 """

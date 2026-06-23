@@ -9,7 +9,7 @@
 ## 구성 (4개 서비스, 각자 독립 venv/프로세스)
 | 서비스 | 포트 | venv/env | 역할 |
 |---|---|---|---|
-| llama-server | 8090 | (바이너리) | LLM **EXAONE-3.5-7.8B**(LG 한국어 특화) |
+| llama-server | 8090 | (바이너리) | LLM **EXAONE-4.0-32B**(A100/H100) / **3.5-7.8B**(4090/3090) |
 | cosyvoice-server | 8092 | conda `cosyvoice` | TTS **CosyVoice3-0.5B**(제로샷 음색복제, 안정) |
 | avatar-server | 8091 | `.venv-avatar` | 토킹헤드 **Ditto**(TensorRT, RTF<1) |
 | callone-serve | 8000 | `.venv-serve` | 오케스트레이터(ASR+LLM+TTS+아바타 조립, WS) |
@@ -30,8 +30,8 @@ PORT=8090 bash scripts/bootstrap_gpu.sh
 ```
 - `.venv-serve` 생성 + `pip install -e .`
 - llama-server 바이너리(프리빌트 다운, 드라이버 안 맞으면 CUDA12.4 자동 재빌드)
-- **EXAONE GGUF**(Q6_K, AetherArchitectural) + **Qwen3-TTS 폴백 모델** 다운
-  (1순위 TTS는 다음 단계 **CosyVoice3**; Qwen3-TTS는 CosyVoice 다운 시 자동 폴백용)
+- GPU VRAM 자동 감지 후 **EXAONE GGUF Q6_K** 다운로드: 40GB 이상은 4.0-32B, 24GB는 3.5-7.8B
+  환경변수 `LLM_REPO`/`LLM_GLOB`/`LLM_DIR`로 명시적 재정의 가능.
 - llama 기동 + GPU 검증. 끝에 `LLM 템플릿: --jinja (GGUF=EXAONE...)` 확인.
 - 검증: `curl -s 127.0.0.1:8090/v1/chat/completions -H "Content-Type: application/json" -d '{"messages":[{"role":"user","content":"안녕"}],"max_tokens":32}'`
 

@@ -54,7 +54,7 @@ class CosyVoiceTTS:
         #   음색은 동일 연속 생성이나 우선순위①(목소리)이라 저장 wav A/B 통과 전엔 false 권장.
         self.stream = bool(scfg.get("stream", True))
         self.timeout = float(scfg.get("cosyvoice_timeout", 60.0))
-        self.ref_asr_model = str(load_config("tts_server").get("ref_transcribe_model", "small"))
+        self.ref_asr_model = str(self.cfg.get("ref_transcribe_model", "large-v3-turbo"))
         # 인메모리 레퍼런스(디스크 0). ref_wav 는 orchestrator 워밍업 게이트용 truthy 마커.
         self._ref_b64: str | None = None
         self._ref_sr: int = 16000

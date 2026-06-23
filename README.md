@@ -9,6 +9,8 @@
 ---
 
 ## 처음이라면 → **[docs/FRESH_SETUP.md](docs/FRESH_SETUP.md)**
+
+현재 확정 스택과 남은 GPU 검증은 **[docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md)**.
 새 GPU 인스턴스에서 클론 → 스크립트 3개 → 실행까지 **한 번에** 세팅하는 절차. 이 문서 하나면 된다.
 
 ---
@@ -33,7 +35,8 @@
 | | **A100 / H100** (예: Elice) | **RTX 4090 / 3090** (예: RunPod) |
 |---|---|---|
 | 아키텍처 | Ampere/Hopper | Ada/Ampere |
-| LLM·TTS·ASR | 동일(EXAONE·CosyVoice3·whisper) | 동일 |
+| LLM | **EXAONE-4.0-32B-abliterated Q6_K** | EXAONE-3.5-7.8B-abliterated Q6_K(VRAM 한계) |
+| TTS·ASR | CosyVoice3·whisper | 동일 |
 | 토킹헤드(Ditto) | **프리빌트 TensorRT 엔진**(`ditto_trt_Ampere_Plus`) 그대로 사용 | **Ada는 엔진 재빌드 필요**(onnx→trt) 또는 PyTorch 폴백 |
 | VRAM | 여유(80GB) | 24GB — 7.8B LLM + 0.5B TTS + Ditto 들어감 |
 
@@ -45,7 +48,7 @@
 
 | 서비스 | 포트 | 역할 | 모델 |
 |---|---|---|---|
-| `llama-server` | 8090 | 한국어 대화 LLM | EXAONE-3.5-7.8B (llama.cpp GGUF) |
+| `llama-server` | 8090 | 한국어 대화 LLM | EXAONE-4.0-32B(A100/H100) / 3.5-7.8B(24GB GPU) |
 | `cosyvoice-server` | 8092 | 제로샷 음색 복제 TTS | CosyVoice3-0.5B (conda env) |
 | `avatar-server` | 8091 | 사진→말하는 얼굴 | Ditto (TensorRT, `.venv-avatar`) |
 | `callone-serve` | 8000 | 오케스트레이터(ASR+LLM+TTS+아바타 조립, WS) | faster-whisper large-v3-turbo (`.venv-serve`) |
@@ -87,7 +90,7 @@ cd ui && npm run dev             # :5173 (별 터미널)
 ## 디렉토리
 ```
 callone/        오케스트레이터·파이프라인 (serve, ingest, diarize, tts, llm, asr ...)
-avatar_server/  토킹헤드(Ditto/MuseTalk) 별 프로세스
+avatar_server/  토킹헤드(Ditto/static) 별 프로세스
 cosyvoice_server/ CosyVoice3 TTS 별 프로세스
 configs/        스테이지별 yaml 설정
 scripts/        세팅·실행 스크립트 (bootstrap_gpu, setup_cosyvoice_gpu, setup_avatar_gpu, run_all ...)

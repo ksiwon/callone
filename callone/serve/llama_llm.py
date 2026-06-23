@@ -54,9 +54,6 @@ class LlamaPersonaLLM:
         self.dry_multiplier = float(_c.get("dry_multiplier", 0.8))
         self.dry_base = float(_c.get("dry_base", 1.75))
         self.dry_allowed_length = int(_c.get("dry_allowed_length", 2))
-        # thinking off 방식: qwen=시스템에 리터럴 /no_think 주입(#20182 버그 차단) / none=EXAONE 등
-        #   (enable_thinking:false 로 충분, /no_think 미주입). 기본 none(현 서빙=EXAONE).
-        self.thinking_workaround = str(_c.get("thinking_workaround", "none"))
         self.timeout = timeout
         self.persona = load_persona(speaker)
         self._persona_override: str | None = None   # 이름·관계(이 사람은 누구)
@@ -162,11 +159,6 @@ class LlamaPersonaLLM:
                 " disappointed, proud, neutral. 매번 neutral 만 쓰지 말고 맥락에 맞춰 다채롭게."
                 " 예: '[emotion:tender] 아이고 우리 딸~ 밥은 묵었나?'"
             )
-        # thinking OFF — qwen 만 시스템 프롬프트의 리터럴 /no_think 가 필요(Qwen3.5 thinking 강제주입
-        #   버그 #20182 차단). EXAONE(3.5/4.0)은 chat_template_kwargs.enable_thinking:false 로 충분 →
-        #   /no_think 리터럴을 넣으면 노이즈(형식 오염 가능)라 안 넣는다. serve.yaml llm.thinking_workaround.
-        if self.thinking_workaround == "qwen":
-            sys += "\n\n/no_think"
         return sys
 
     def _post_history(self) -> str:
@@ -214,8 +206,7 @@ class LlamaPersonaLLM:
             "repeat_last_n": 64,
             "frequency_penalty": 0.1,
             "presence_penalty": 0.3,
-            # Qwen3.5 thinking 끄기(짧고 빠른 전화 응답). 서버가 무시해도 _strip_think 가 처리.
-            # (EXAONE 은 thinking_workaround=none 이라 무해 — 작업3에서 per-model 정리 예정.)
+            # EXAONE reasoning 비활성. _strip_think는 구형 서버 응답의 안전망.
             "chat_template_kwargs": {"enable_thinking": False},
         }
 

@@ -1,4 +1,4 @@
-"""한국어 LLM A/B 벤치 — 모델 교체 결정용(작업3, docs/IMPROVEMENT_PLAN.md).
+"""한국어 LLM A/B 벤치 — 한국어 품질 확인용(docs/CURRENT_STATUS.md).
 
 여러 llama-server(서로 다른 모델/포트)를 **실 서빙 경로 그대로**(LlamaPersonaLLM = 작업2 프롬프트+
 DRY 샘플러 포함) 고정 한국어 멀티턴 시나리오로 돌려 응답을 나란히 덤프한다. 사람이 A/B 채점

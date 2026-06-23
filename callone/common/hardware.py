@@ -71,13 +71,11 @@ def tier_defaults(tier: str | None = None) -> dict:
     table = {
         "server_gpu": {
             "llm_config": "llm_server",          # EXAONE-3.5-7.8B
-            "tts_config": "tts_server",          # 풀튜닝 화자 TTS(제로샷 통화는 CosyVoice3)
             "asr_realtime": "large-v3-turbo",    # 또는 Voxtral
             "asr_compute": "float16",
         },
         "laptop_cpu": {
             "llm_config": "llm_laptop",          # EXAONE-3.5-2.4B (Arc iGPU, 경량)
-            "tts_config": "tts_laptop",          # per-speaker 소형(Kokoro/Piper/MeloTTS)
             "asr_realtime": "small",             # CPU/Arc 실시간엔 small/turbo-int8
             "asr_compute": "int8",
         },

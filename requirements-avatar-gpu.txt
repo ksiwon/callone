@@ -1,7 +1,7 @@
 # avatar-server(토킹헤드) 전용 의존성 — **별 venv `.venv-avatar`**.
 #
-# ⚠️ callone 서빙 venv(.venv-serve, transformers==4.57.3 하드핀)와 **절대 섞지 마라**.
-#    Ditto/MuseTalk 는 자체 diffusers/mmcv/torch 스택 → 충돌 → 별 프로세스(이 서버)로 격리.
+# ⚠️ callone 서빙 venv(.venv-serve)와 **절대 섞지 마라**.
+#    Ditto는 자체 TensorRT/torch 스택 → 충돌 → 별 프로세스(이 서버)로 격리.
 #    (llama-server·callone-serve 와 동일 패턴: HTTP/WS 로만 호출, 파이썬 의존성 0.)
 #
 # ── 공통(서버 골격 + static 백엔드, CPU 에서도 동작) ──────────────────────
@@ -23,8 +23,3 @@ soundfile>=0.12
 # scikit-image
 # tensorrt==8.6.1            # Ampere(A100) TensorRT 백엔드. 비-Ampere 는 ONNX→TRT 변환(repo 스크립트)
 # cuda-python
-
-# ── MuseTalk 백엔드(GPU, 대안) — TMElyralab/MuseTalk ─────────────────────
-#   mmcv / mmdet / mmpose + diffusers 필요(repo setup 따름). ~9GB 체크포인트.
-# diffusers
-# mmcv  mmdet  mmpose

@@ -20,7 +20,7 @@ from pathlib import Path
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="pretrained_models/CosyVoice2-0.5B")
+    ap.add_argument("--model", default="pretrained_models/Fun-CosyVoice3-0.5B")
     ap.add_argument("--ref", required=True, help="레퍼런스 wav (화자 A 깨끗한 클립)")
     ap.add_argument("--ref-text", required=True, help="레퍼런스 wav 의 발화 텍스트")
     ap.add_argument("--text", default="내 왔다 아이가 밥은 묵었나. 오늘 저녁은 뭐 먹을라꼬?",

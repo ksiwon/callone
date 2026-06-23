@@ -6,8 +6,8 @@
   - barge-in: 클론이 말하는 중 사용자가 말하면 즉시 중단(interrupt)
   - 짧은 응답: OV LLM system 프롬프트 + max_new_tokens 로 전화처럼 1~2문장
 
-LLM: OVPersonaLLM(OpenVINO, Arc GPU) 우선 → 없으면 PersonaLLM 폴백.
-TTS: KokoroTTS(화자 A 음색) → 없으면 placeholder.
+LLM: llama-server(EXAONE) 우선 → 노트북 OpenVINO → 경량 폴백.
+TTS: CosyVoice3 → Piper → Kokoro placeholder 폴백.
 """
 from __future__ import annotations
 
@@ -93,23 +93,15 @@ def _pick_llm(speaker: str, serve_cfg: dict):
 
 def _pick_tts(speaker: str, serve_cfg: dict):
     tts_cfg = (serve_cfg or {}).get("tts", {})
-    backend = tts_cfg.get("backend", "qwen3-tts")
-    # 0a) CosyVoice3(별 프로세스 :8092, 제로샷 클론 안정성↑ — 실측: 음색 튐 없음). backend=cosyvoice3.
+    backend = tts_cfg.get("backend", "cosyvoice3")
+    # 0) CosyVoice3(별 프로세스 :8092, 제로샷 클론 안정성↑ — 실측: 음색 튐 없음). backend=cosyvoice3.
     if backend == "cosyvoice3":
         try:
             from .tts_cosyvoice import CosyVoiceTTS
 
             return CosyVoiceTTS(speaker, tts_cfg)
         except Exception as e:  # noqa: BLE001
-            log.warning("CosyVoice3 불가(%s) — Qwen3-TTS 폴백", e)
-    # 0) Qwen3-TTS(서버 GPU, 감정 instruct 통합) — 결정서 §2. backend=qwen3-tts 일 때만.
-    if backend in ("qwen3-tts", "cosyvoice3"):
-        try:
-            from .tts_qwen import QwenTTS
-
-            return QwenTTS(speaker, tts_cfg)
-        except Exception as e:  # noqa: BLE001
-            log.warning("Qwen3-TTS 불가(%s) — Piper 시도", e)
+            log.warning("CosyVoice3 불가(%s) — Piper 폴백", e)
     # 1) Piper(화자 A 음색 학습본, onnx torch-free)
     try:
         from .tts_piper import PiperTTS
@@ -117,16 +109,10 @@ def _pick_tts(speaker: str, serve_cfg: dict):
         return PiperTTS(speaker, tts_cfg)
     except Exception as e:  # noqa: BLE001
         log.warning("Piper TTS 불가(%s) — Kokoro 시도", e)
-    # 2) Kokoro(제로샷)
-    try:
-        from .tts_kokoro import KokoroTTS
+    # 2) Kokoro: 패키지가 없어도 내부 tone placeholder 로 안전 폴백한다.
+    from .tts_kokoro import KokoroTTS
 
-        return KokoroTTS(speaker, tts_cfg)
-    except Exception as e:  # noqa: BLE001
-        log.warning("Kokoro TTS 실패(%s) — placeholder", e)
-        from .tts_stream import StreamTTS
-
-        return StreamTTS(speaker)
+    return KokoroTTS(speaker, tts_cfg)
 
 
 _EMOTIONS = ("happy", "sad", "angry", "neutral", "excited", "surprised",

@@ -8,7 +8,7 @@
 ```
 .venv-serve  callone-serve(:8000, WS) ──오디오──▶ 스피커/UI
                      │  └─사진,오디오청크(HTTP/WS)─▶ avatar-server(:8091, .venv-avatar) ─JPEG프레임─▶ UI
-                     └─프롬프트(HTTP)─▶ llama-server(:8080)
+                     └─프롬프트(HTTP)─▶ llama-server(:8090)
 ```
 
 ---

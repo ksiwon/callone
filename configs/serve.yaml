@@ -24,17 +24,13 @@ asr:
   beam_size: 1                        # greedy → 실시간 지연 최소
 llm:
   # 백엔드 선택 (callone_stack_decision.md §3: llama.cpp 채택):
-  #   llama = llama-server(HTTP, OpenAI 호환) EXAONE-3.5-7.8B(서버) / Qwen3.5-4B(노트북) + LoRA
-  #   ov    = OpenVINO base Qwen3-4B(Arc, 변환 가능한 모델만)
+  #   llama = llama-server(HTTP, OpenAI 호환) EXAONE-4.0-32B(A100/H100) / 3.5-7.8B(24GB)
+  #   ov    = OpenVINO EXAONE-3.5-2.4B(Arc 노트북)
   #   auto  = llama 먼저 시도(서버 떠있으면), 없으면 ov → 폴백
   backend: auto                # auto | llama | ov | vllm
   base_url: "http://127.0.0.1:8090"   # llama-server 주소(Elice 가 8080 점유 → 8090 기본. bootstrap 이 PORT 로 동기)
-  config: llm_laptop           # llm_server(서버 EXAONE-3.5-7.8B) | llm_laptop(노트북 EXAONE-3.5-2.4B)
+  config: llm_laptop           # llm_server(학습용) | llm_laptop(노트북 EXAONE-3.5-2.4B)
   enable_thinking: false       # §1-3: 대화용 thinking 비활성(응답 지연 억제)
-  # thinking off 방식: none=EXAONE(enable_thinking:false 로 충분, /no_think 미주입) /
-  #   qwen=Qwen3.5 만(시스템에 리터럴 /no_think 주입해 thinking 강제주입 버그 #20182 차단).
-  #   현 서빙=EXAONE → none. Qwen 계열로 바꾸면 qwen.
-  thinking_workaround: none
   # 기억 회상: extract_memories.py 로 memories.json 만든 뒤 true 권장(의미검색=삼천포 없음).
   use_rag: false               # 사실 추출 후 true 로
   embedder: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # fastembed 지원본(한국어 OK)
@@ -57,9 +53,10 @@ llm:
   max_history: 24
 tts:
   # cosyvoice3 = 제로샷 클론 음색 안정(실측: Qwen3-TTS 는 턴마다 음색 튐 → CosyVoice3-0.5B 채택).
-  # 별 프로세스(:8092, conda env) — setup_cosyvoice_gpu.sh. 서버 다운이면 qwen3-tts 자동 폴백.
-  backend: cosyvoice3          # cosyvoice3 | qwen3-tts | piper | kokoro
+  # 별 프로세스(:8092, conda env) — setup_cosyvoice_gpu.sh. 서버 다운이면 Piper/Kokoro 폴백.
+  backend: cosyvoice3          # cosyvoice3 | piper | kokoro
   cosyvoice_url: "http://127.0.0.1:8092"
+  ref_transcribe_model: "large-v3-turbo"
   # 작업1 TTS 스트리밍: true=서버 /synth_stream(네이티브 bistream, 첫음성 ~1.3s→~0.3s).
   #   ⚠️ 우선순위①(목소리)이라 **기본 false**(통짜 /synth=현 동작). 박스에서 저장 wav A/B 로 통짜 vs
   #   스트리밍 음색 동일 확인 + 라이브 끊김 없음 확인 후에만 true 로(메모리 'A/B 통과 전 라이브 금지').
@@ -86,9 +83,7 @@ tts:
   # 프라이버시 ephemeral(기본 on): 디스크 ref 없어도 TTS 생성 OK → 통화 시작 시 프론트가 보낸
   # 음성으로 인메모리 설정(/dev/shm, 끊기면 즉시 삭제). 디스크 파일 안 만듦. false=옛 동작(디스크 ref 필수).
   ephemeral: true
-orchestration: pipecat         # Pipecat + LiveKit(WebRTC)
-latency_budget_ms: 1200        # 첫 음성 < 1.2s, 목표 0.8s
-# 토킹헤드(사진→움직이는 얼굴, 영상통화) — docs/avatar_talking_head_design.md.
+# 토킹헤드(사진→움직이는 얼굴, 영상통화) — docs/AVATAR_RUN.md.
 # 증명사진 1장 + TTS 음성 → 입·표정·고개. 음성의 부가 레이어(모델 없으면 정지사진 폴백).
 avatar:
   enabled: true                # 영상통화 on. 사진 업로드 시 프레임 생성(백엔드 static→정지, ditto→움직임).
@@ -99,9 +94,3 @@ avatar:
   fps: 25
   resolution: 256              # 256 | 512 (VRAM/지연 trade)
   frame_format: jpeg           # jpeg (1차) | h264 (WebRTC 스케일 시)
-rag:
-  enabled: true
-  vector_db: faiss             # faiss | chroma | qdrant | sqlite-vss
-  embedder: "google/embeddinggemma"
-memory:
-  backend: mem0                # mem0 | zep

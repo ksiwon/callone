@@ -8,10 +8,10 @@
 - **작업2(한국어, 무해):** `llama_llm._system()` 충돌 규칙 통합 + `_payload()` DRY/min_p, `serve.yaml` 노브. **temp 0.4 유지**(검토: 0.6 미검증·비문위험). ✅ 적용(기본 동작 변경 = 반복억제만).
 - **작업1(TTS 스트리밍):** `cosyvoice_server` `/synth_stream` + `tts_cosyvoice` 토글. **`tts.stream: false` 기본**(A/B 전 음색 불변). ✅ 코드, ⏸ 라이브는 박스 A/B 후.
 - **작업4-A(아바타 워밍업):** `orchestrator._warmup_avatar()` — 세션 시작 단발(라이프사이클 불변). ✅ 적용.
-- **작업3(모델):** `bootstrap_gpu.sh` 기본 7.8B 유지 + A100 힌트(자동 32B 안 함), `llm.thinking_workaround`, `scripts/bench_llm_korean.py`. ✅ 코드, ⏸ 모델 결정은 벤치 후.
+- **작업3(모델):** A100/H100 기본을 **EXAONE-4.0-32B-abliterated Q6_K로 확정**. 24GB GPU는 VRAM 한계로 7.8B 유지. ✅
 - **작업2-D(UI):** `CallScreen.tsx` 예시 캐릭터 프리셋 칩 4개(원클릭→example_dialogue 채움). ✅ 적용.
 - 회귀 테스트: `tests/test_improve_round.py` 9개(샘플러·thinking 게이트·TTS 프레이밍·아바타 워밍업).
-- **GPU 박스 전용(남음):** ① TTS `/synth_stream` 저장wav 음색 A/B→통과 시 `tts.stream:true` ② `bench_llm_korean.py` 32B vs 7.8B + huihui 32B repo명 ③ `callone-bench` 첫음성 ms·아바타 첫프레임 ④ llama-server `dry_*`·`min_p` 지원 확인. (상세 = 각 작업 '검증' 절 + 맨 아래 체크리스트.)
+- **GPU 박스 전용(남음):** ① TTS `/synth_stream` 저장wav 음색 A/B→통과 시 `tts.stream:true` ② 32B 실통화 한국어·속도 확인 ③ `callone-bench` 첫음성 ms·아바타 첫프레임 ④ llama-server `dry_*`·`min_p` 지원 확인. (상세 = 각 작업 '검증' 절 + 맨 아래 체크리스트.)
 
 ## 시행착오에서 가져온 제약 (이 설계가 반드시 지킴)
 - **한국어 모델:** Gemma4(약함)→Qwen3.5-9B(**한국어 깨짐**)→EXAONE 채택. → 교체 후보는 **한국어 특화**만(Qwen 계열 제외).
@@ -204,23 +204,19 @@ llm:
 |---|---|---|---|
 | **A100/H100** | 80GB | **EXAONE-4.0-32B-abliterated** (Q5~Q6) | 동시구동 여유. 무검열 최신·최대 |
 | **3090/4090** | 24GB | **EXAONE-3.5-7.8B-abliterated** (현행 유지) | 32B는 TTS+ASR+Ditto 동시구동 시 24GB 초과 위험 → 제외 |
-> 32B abliterate가 한국어를 깎으면 A100도 7.8B 유지. **벤치(아래 D)로 결정** — 이기는 걸 A100 기본값.
+> 사용자 확정(2026-06-23): A100/H100 기본은 32B Q6_K. 24GB GPU만 7.8B를 유지한다.
 
 ### 변경점
 **A. `common/hardware` VRAM 감지 + 모델 자동선택**
 - 현 `detect_tier()` 는 server_gpu/laptop_cpu만 구분(24 vs 80 구분 안 함).
 - VRAM 임계(>=40GB)로 `LLM_REPO`/`LLM_GGUF` 기본값 분기. `bootstrap_gpu.sh` 가 읽음.
 
-**B. `scripts/bootstrap_gpu.sh` — 기본 7.8B 유지 + A100 힌트(검토수정: 32B 자동전환 안 함)**
-- 32B repo명 미검증 + 사용자=벤치후결정 → **자동 32B 다운로드는 A100 bootstrap halt 위험.** 기본은 검증된 7.8B(두 GPU 다 동작). A100(VRAM>=40)이면 안내만 출력.
+**B. `scripts/bootstrap_gpu.sh` — VRAM별 확정 모델 자동선택**
+- A100/H100(VRAM>=40GB)은 `mradermacher/Huihui-EXAONE-4.0-32B-abliterated-GGUF` Q6_K를 자동 선택한다. 24GB GPU는 기존 7.8B Q6_K를 유지한다.
 ```bash
-LLM_REPO="${LLM_REPO:-AetherArchitectural/EXAONE-3.5-7.8B-Instruct-abliterated-GGUF-ARM-Imatrix-Community}"
-LLM_GLOB="${LLM_GLOB:-*Q6_K*.gguf}"
-VRAM_GB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | awk '{print int($1/1024)}')"
-if [ "${VRAM_GB:-0}" -ge 40 ]; then
-  echo "[LLM] VRAM ${VRAM_GB}GB — 32B 여유. 기본=7.8B. 32B 는 bench 후 수동:"
-  echo "  LLM_REPO=<32B GGUF repo> LLM_GLOB='*Q5_K_M*.gguf' LLM_DIR=\$CALLONE_HOME/models/llm_exaone4_32b bash scripts/bootstrap_gpu.sh"
-fi
+VRAM_GB=... # nvidia-smi
+# >=40GB: EXAONE-4.0-32B-abliterated Q6_K
+# <40GB:  EXAONE-3.5-7.8B-abliterated Q6_K
 ```
 **C. thinking 처리 per-model (중요)**
 - 현 `configs/qwen3_nothink.jinja`·`/no_think` 는 **Qwen3.5 thinking 버그 대응**(llama.cpp #20182). **EXAONE엔 불필요·해로울 수 있음.**
@@ -294,7 +290,7 @@ if self.avatar is not None:
 
 ## 미확정·착수 시 웹 재확인 (§3 의무)
 - [x] EXAONE4.0 무검열 확인(2026-06-22): 1.2B/32B만, abliterated 둘 다 존재. 32B=`huihui-ai/Huihui-EXAONE-4.0-32B-abliterated`. 1.2B 탈락(역행). 현 7.8B-abliterated 이미 무검열.
-- [ ] huihui 32B-abliterated GGUF **정확한 repo명·파일명·Q레벨** + 한국어 coherence(crude abliterate라 벤치 필수).
+- [x] 32B GGUF 저장소·Q레벨 확정(2026-06-23): `mradermacher/Huihui-EXAONE-4.0-32B-abliterated-GGUF`, Q6_K(약 26.4GB).
 - [ ] EXAONE AI Model License 상업화 조건(로컬 개인용은 OK).
 - [ ] 현 llama-server 빌드가 `dry_*`·`min_p` 파라미터 노출하는지.
 - [ ] CosyVoice3(Fun-CosyVoice3-0.5B) `inference_zero_shot(stream=True)` 청크 yield 형태·경계 노이즈.

@@ -34,17 +34,17 @@ callone-correct --hours 3
 callone-asr-train
 
 # (2) 목소리 복제
-callone-tts-train   --speakers A B      # 서버 고품질 (풀튜닝 화자 TTS)
-callone-tts-laptop  --speakers A B      # 노트북용 경량 (Piper / MeloTTS / Kokoro)
+bash scripts/setup_piper_gpu.sh              # Piper 학습 환경
+# 실제 학습 절차: docs/5_화자A_목소리_학습.md (화자별 반복)
 
 # (3) 말투·성격 복제
-callone-llm-train  --config llm_server --speakers A B   # EXAONE-3.5-7.8B (한국어 특화)
+callone-llm-train  --config llm_server --speakers A B   # 풀튜닝 경로(서빙 기본 32B와 별개)
 callone-llm-train  --config llm_laptop --speakers A B   # 노트북용 EXAONE-3.5-2.4B (경량)
 ```
 
 ## 결과물 (학습된 모델)
 - `models/asr_dialect/` — 방언 적응 ASR
-- `models/tts_server/{A,B}/`, `models/tts_laptop/{A,B}/` — 목소리
+- `models/tts_piper/{A,B}.onnx` — 학습된 목소리
 - `models/llm_server/{A,B}/`, `models/llm_laptop/{A,B}/` — 말투
 
 이 `models/` 폴더를 노트북으로 가져가면 통화 가능 → [3번](3_노트북에서_통화.md).

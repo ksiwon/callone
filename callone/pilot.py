@@ -74,7 +74,7 @@ def run(n: int, speaker: str, stages: list[str]) -> None:
 
     write_json(data_dir().parent / "reports" / "pilot_report.json", report)
     log.info("파일럿 완료: %s", report["stages"])
-    log.info("다음(무거운 학습): callone-asr-train / callone-tts-train / callone-llm-train")
+    log.info("다음(무거운 학습): callone-asr-train / setup_piper_gpu.sh / callone-llm-train")
 
 
 def main() -> None:
