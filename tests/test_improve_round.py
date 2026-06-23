@@ -12,7 +12,7 @@ import struct
 import numpy as np
 
 from callone.serve.llama_llm import LlamaPersonaLLM
-from callone.serve.tts_cosyvoice import _read_exactly
+from callone.serve.tts_cosyvoice import CosyVoiceTTS, _read_exactly
 from callone.serve.orchestrator import Orchestrator
 
 
@@ -55,6 +55,10 @@ def test_exaone_prompt_has_no_foreign_nothink_token():
 
 
 # ----- 작업1: TTS 스트리밍 프레이밍 [4B LE len][f32 PCM] ---------------------
+def test_cosyvoice_init_reads_reference_asr_from_cfg(monkeypatch):
+    monkeypatch.setattr(CosyVoiceTTS, "_probe", lambda self: None)
+    tts = CosyVoiceTTS("test", {"ref_transcribe_model": "small"})
+    assert tts.ref_asr_model == "small"
 def _encode(a: np.ndarray) -> bytes:
     b = a.astype(np.float32).tobytes()
     return struct.pack("<I", len(b)) + b
