@@ -163,12 +163,16 @@ class DittoModel(AvatarModel):
                     except OSError:
                         pass
         # 워커가 비동기로 num_f 프레임 생성 → 모일 때까지 drain. 첫 프레임은 콜드(TRT 첫추론 ~수십초)라
-        # 아주 길게(90s), 이후는 짧게(2s). (클라 WS 타임아웃도 이보다 커야 함 — avatar.py)
+        # 아주 길게(90s). 이후는 **프레임 간 갭** 타임아웃 — 정상 생성은 RTF~0.65(프레임 ~52ms 간격)인데,
+        # num_f(ceil(audio*25))가 실제보다 살짝 커서 마지막 몇 프레임을 헛기다리다 break 한다. 이 갭이
+        # 2.0s 면 턴마다 ~2s 순수 낭비(실측 ditto-timing) → 0.5s 로(40배 여유, 받는 프레임 동일).
+        # 박스 튜닝: DITTO_DRAIN_GAP_S(중간 스톨로 영상이 잘리면 ↑, 더 빠르게는 ↓).
+        gap_to = float(os.environ.get("DITTO_DRAIN_GAP_S", "0.5"))
         td = time.time()
         got = 0
         while got < num_f:
             try:
-                fr = sink.q.get(timeout=(90.0 if got == 0 else 2.0))
+                fr = sink.q.get(timeout=(90.0 if got == 0 else gap_to))
             except queue.Empty:
                 break
             if fr is None:
