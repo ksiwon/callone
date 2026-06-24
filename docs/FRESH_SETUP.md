@@ -1,5 +1,18 @@
 # callone 새 인스턴스 원샷 세팅 (A100/4090)
 
+## TL;DR — 이 두 줄로 끝
+
+```bash
+git clone <리포URL> callone && cd callone
+bash install.sh
+```
+
+llama(EXAONE) → CosyVoice3(TTS) → Ditto(avatar) → UI dev server 순서로 자동 설치·기동.  
+재기동만 필요하면: `bash scripts/run_all.sh`  
+단계별 수동 제어: `SKIP_COSYVOICE=1 SKIP_AVATAR=1 bash install.sh`
+
+---
+
 인스턴스를 지웠다 다시 만들었을 때 **이 순서대로만** 하면 음성+영상 통화까지 바로 된다.
 모든 함정(드라이버·의존성·모델경로)은 스크립트에 자가치유로 박혀 있다. 게이트 모델 없음(HF 토큰 불필요).
 
