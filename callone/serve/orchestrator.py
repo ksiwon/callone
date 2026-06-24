@@ -316,9 +316,10 @@ class Orchestrator:
     def interrupt(self):
         """barge-in: 진행 중인 응답 중단 (app 이 마이크에서 사용자 발화 감지 시 호출)."""
         self._interrupt.set()
-        if self.avatar is not None:
+        av = self.avatar  # stream_turn 이 self.avatar = None 하는 것과의 race 방지(로컬 ref)
+        if av is not None:
             try:
-                self.avatar.interrupt()
+                av.interrupt()
             except Exception:  # noqa: BLE001
                 pass
 

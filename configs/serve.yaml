@@ -37,8 +37,8 @@ llm:
   rag_min_score: 0.45          # 게이트(MiniLM 기준): 미만이면 기억 안 씀. 허위회상 잦으면 ↑, 회상 약하면 ↓
   temperature: 0.4             # 실측(EXAONE-3.5-7.8B): 0.7=비문 잦음, 0.4=문법 안정. 반복은 temp 가 아니라
                                # DRY+프롬프트로 잡으므로 0.4 유지(변수 격리). 더 생생하게는 0.5~0.6 A/B(비문 trade).
-  top_p: 0.8                   # ⚠️ 참고: 현재 _payload 는 top_p/top_k 를 안 보냄(미사용). 샘플링=temperature+min_p+DRY.
-  top_k: 20
+  # top_p / top_k: _payload 에서 llama-server 로 보내지 않음(미사용). 샘플링=temperature+min_p+DRY.
+  # 활성화하려면 llama_llm._payload 에 "top_p"/"top_k" 키를 추가해야 한다.
   # 반복/되묻기 억제(작업2) — DRY 샘플러가 주력. n-gram 반복만 끊고 한국어 문법은 안 건드림.
   #   페널티 강하게의 부작용("그치마니/하렴 야호" 비문) 없이 "같은 질문 반복"·"뭐.뭐.뭐." 차단.
   min_p: 0.05                  # 저확률 토큰 컷(top_k/top_p 보조) — 자연스러움 강건

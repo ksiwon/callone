@@ -58,12 +58,26 @@ pkill -f "callone-serve" 2>/dev/null; sleep 1
 echo "[3/3] callone-serve :8000..."
 ( source .venv-serve/bin/activate && nohup callone-serve > "$LOG/serve.log" 2>&1 & )
 
-sleep 5
-echo "--- health ---"
-echo -n "llama  : "; curl -s "127.0.0.1:$PORT_LLM/health" || echo "(아직)"; echo
-echo -n "avatar : "; curl -s "127.0.0.1:8091/health" || echo "(없음/static 생략)"; echo
-echo -n "serve  : "; curl -s "127.0.0.1:8000/api/health" || echo "(아직)"; echo
-echo -n "cosy   : "; curl -s "127.0.0.1:8092/health" || echo "(로딩중/없음 → Qwen 폴백)"; echo
+# health poll — 서비스별 최대 대기(모델 로드가 5s 초과 가능, 특히 32B GGUF).
+#   _wait SVC URL MAX_WAIT_S: MAX_WAIT_S 초 안에 200 응답이 오면 ✅, 초과면 경고만(exit 0 유지).
+_wait() {
+  local name="$1" url="$2" max="${3:-30}" waited=0
+  printf "%-8s: " "$name"
+  while true; do
+    if curl -sf "$url" >/dev/null 2>&1; then
+      curl -s "$url"; echo " ✅"; return 0
+    fi
+    if [ "$waited" -ge "$max" ]; then
+      echo "(${max}s 내 응답 없음 — 백그라운드서 계속 로드 중)"; return 0
+    fi
+    sleep 3; waited=$((waited + 3))
+  done
+}
+echo "--- health (서비스별 최대 30~60s 대기) ---"
+_wait "llama"   "http://127.0.0.1:$PORT_LLM/health" 60
+_wait "avatar"  "http://127.0.0.1:8091/health"       30
+_wait "serve"   "http://127.0.0.1:8000/api/health"   30
+_wait "cosy"    "http://127.0.0.1:8092/health"       60
 cat <<EOF
 --- 다음 ---
   UI:  cd ui && npm run dev        (별 터미널)  → 브라우저 localhost:5173/call/me

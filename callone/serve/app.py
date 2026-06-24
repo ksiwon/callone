@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -90,7 +92,7 @@ def create_app():
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                        allow_headers=["*"])
 
-    _orchestrators: dict[str, object] = {}
+    _orchestrators: dict[str, Any] = {}
 
     @app.get("/api/health")
     def health():
@@ -118,7 +120,8 @@ def create_app():
         sp = _speakers_dir() / sid / "sample_utterances.json"
         return read_json(sp) if sp.exists() else []
 
-    _preview = {}   # 프로세스 캐시: CosyVoiceTTS 핸들(재프로브 비용 절감)
+    _preview: dict = {}   # 프로세스 캐시: CosyVoiceTTS 핸들(재프로브 비용 절감)
+    _preview_lock = threading.Lock()  # 동시 미리듣기 요청 직렬화(ref overwrite 방지)
 
     @app.post("/api/voice/preview")
     async def voice_preview(payload: dict):
@@ -146,16 +149,17 @@ def create_app():
 
         def _work():
             from .tts_cosyvoice import CosyVoiceTTS
-            tts = _preview.get("tts")
-            if tts is None:
-                tts = CosyVoiceTTS("preview", load_config("serve").get("tts", {}))
-                _preview["tts"] = tts
-            try:
-                tts.set_reference(a, int(asr), payload.get("ref_text") or None)
-                audio, sr = tts.synth(text)
-                return tts.ref_text, audio, sr
-            finally:
-                tts.cleanup_reference()   # 인메모리 개인데이터 즉시 폐기
+            with _preview_lock:   # 동시 요청이 같은 tts 객체의 ref 를 덮어쓰는 것 방지
+                tts = _preview.get("tts")
+                if tts is None:
+                    tts = CosyVoiceTTS("preview", load_config("serve").get("tts", {}))
+                    _preview["tts"] = tts
+                try:
+                    tts.set_reference(a, int(asr), payload.get("ref_text") or None)
+                    audio, sr = tts.synth(text)
+                    return tts.ref_text, audio, sr
+                finally:
+                    tts.cleanup_reference()   # 인메모리 개인데이터 즉시 폐기
 
         loop = asyncio.get_running_loop()
         try:

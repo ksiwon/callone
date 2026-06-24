@@ -24,6 +24,7 @@ import base64
 import os
 import struct
 import tempfile
+import threading
 
 import numpy as np
 import soundfile as sf
@@ -43,9 +44,14 @@ SEED = int(os.environ.get("COSYVOICE_SEED", "1234"))   # >=0 고정 → 턴마�
 print(f"[cosyvoice] 모델 로드: {MODEL_DIR}")
 _cosy = AutoModel(model_dir=MODEL_DIR)
 SR = _cosy.sample_rate
-NEEDS_SYS = "CosyVoice3" in type(_cosy).__name__
+# cosyvoice3.yaml 존재 여부로 판정(type().__name__ 은 AutoModel 래퍼라 믿을 수 없음).
+NEEDS_SYS = os.path.exists(os.path.join(MODEL_DIR, "cosyvoice3.yaml"))
 SYS_PROMPT = "You are a helpful assistant.<|endofprompt|>"
 print(f"[cosyvoice] 로드 완료 (sr={SR}, CosyVoice3={NEEDS_SYS})")
+
+# uvicorn 이 sync 핸들러를 threadpool 에서 실행 → 동시 요청이 _cosy / torch.manual_seed 공유.
+# GPU 단일 디바이스라 어차피 직렬이지만 seed 상태가 섞이는 것 방지.
+_infer_lock = threading.Lock()
 
 app = FastAPI(title="callone cosyvoice3")
 
@@ -83,20 +89,21 @@ def synth(req: SynthReq):
     os.close(fd)
     sf.write(ref_path, ref16.astype(np.float32), 16000)
     try:
-        # 시드 고정 → 같은 ref/텍스트면 매 합성 동일 음색(턴 편차 제거). CosyVoice 내부 샘플링도 통일.
-        if SEED >= 0:
-            torch.manual_seed(SEED)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(SEED)
-        pt = (req.prompt_text or "").strip()
-        if NEEDS_SYS:
-            gen = _cosy.inference_zero_shot(req.text.strip(), SYS_PROMPT + pt, ref_path, stream=False)
-        elif pt:
-            gen = _cosy.inference_zero_shot(req.text.strip(), pt, ref_path, stream=False)
-        else:
-            gen = _cosy.inference_cross_lingual(req.text.strip(), ref_path, stream=False)
-        chunks = [j["tts_speech"] for j in gen]
-        audio = torch.concat(chunks, dim=1).squeeze(0).detach().cpu().numpy().astype(np.float32)
+        with _infer_lock:
+            # 시드 고정 → 같은 ref/텍스트면 매 합성 동일 음색(턴 편차 제거). CosyVoice 내부 샘플링도 통일.
+            if SEED >= 0:
+                torch.manual_seed(SEED)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(SEED)
+            pt = (req.prompt_text or "").strip()
+            if NEEDS_SYS:
+                gen = _cosy.inference_zero_shot(req.text.strip(), SYS_PROMPT + pt, ref_path, stream=False)
+            elif pt:
+                gen = _cosy.inference_zero_shot(req.text.strip(), pt, ref_path, stream=False)
+            else:
+                gen = _cosy.inference_cross_lingual(req.text.strip(), ref_path, stream=False)
+            chunks = [j["tts_speech"] for j in gen]
+            audio = torch.concat(chunks, dim=1).squeeze(0).detach().cpu().numpy().astype(np.float32)
     finally:
         try:
             os.remove(ref_path)
@@ -133,15 +140,17 @@ def synth_stream(req: SynthReq):
 
     def gen():
         try:
-            if SEED >= 0:                       # 시드 고정 → 턴 편차 0(통짜 경로와 동일)
-                torch.manual_seed(SEED)
-                if torch.cuda.is_available():
-                    torch.cuda.manual_seed_all(SEED)
-            for j in _gen_iter(req.text.strip(), ref_path, req.prompt_text, stream=True):
-                a = j["tts_speech"].squeeze(0).detach().cpu().numpy().astype(np.float32)
-                a = np.clip(_resample(a, SR, OUT_SR), -1.0, 1.0).astype(np.float32)
-                b = a.tobytes()
-                yield struct.pack("<I", len(b)) + b
+            with _infer_lock:
+                # 시드 고정 → 턴 편차 0(통짜 경로와 동일). lock 안에서 seed+추론을 묶어 thread 간 seed 경쟁 방지.
+                if SEED >= 0:
+                    torch.manual_seed(SEED)
+                    if torch.cuda.is_available():
+                        torch.cuda.manual_seed_all(SEED)
+                for j in _gen_iter(req.text.strip(), ref_path, req.prompt_text, stream=True):
+                    a = j["tts_speech"].squeeze(0).detach().cpu().numpy().astype(np.float32)
+                    a = np.clip(_resample(a, SR, OUT_SR), -1.0, 1.0).astype(np.float32)
+                    b = a.tobytes()
+                    yield struct.pack("<I", len(b)) + b
         finally:
             try:
                 os.remove(ref_path)
