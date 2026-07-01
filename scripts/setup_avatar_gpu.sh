@@ -111,6 +111,20 @@ if [ "$USE_TRT" = 1 ]; then
   pip uninstall -y tensorrt tensorrt-libs tensorrt-bindings tensorrt_cu12 tensorrt_cu12_libs tensorrt_cu12_bindings >/dev/null 2>&1 || true
   pip install tensorrt-libs==8.6.1 tensorrt-bindings==8.6.1 nvidia-cudnn-cu12==8.9.7.29 --extra-index-url https://pypi.nvidia.com
   pip install tensorrt==8.6.1 --no-build-isolation --extra-index-url https://pypi.nvidia.com || true
+  # ── cuDNN 8·9 진짜 공존(중요) ──────────────────────────────────────────────
+  # 위 nvidia-cudnn-cu12==8.9.7.29(TRT8.6 용)는 torch 2.6 이 요구하는 cuDNN9(같은 pip 패키지)를
+  # 덮어써 제거 → torch import 시 `libcudnn.so.9 없음`(RTX3090 실측). soname 이 so.8 vs so.9 로 달라
+  # 물리적 공존은 가능하므로: TRT용 so.8 백업 → cuDNN9 재설치(torch 복구) → so.8 되돌려 둘 다 존재.
+  # (run_all 이 이 nvidia/cudnn/lib 를 LD_LIBRARY_PATH 에 주입 → TRT=so.8, torch=so.9 각자 찾음.)
+  CUDNN_LIB="$(python -c 'import site,os;print(os.path.join(site.getsitepackages()[0],"nvidia","cudnn","lib"))' 2>/dev/null)"
+  if [ -n "$CUDNN_LIB" ] && [ -d "$CUDNN_LIB" ]; then
+    TMP8="$(mktemp -d)"
+    cp -a "$CUDNN_LIB"/libcudnn*.so.8* "$TMP8"/ 2>/dev/null || true
+    pip install nvidia-cudnn-cu12==9.1.0.70 --extra-index-url https://pypi.nvidia.com   # torch 용 so.9 복구
+    cp -a "$TMP8"/libcudnn*.so.8* "$CUDNN_LIB"/ 2>/dev/null || true                     # TRT 용 so.8 공존
+    rm -rf "$TMP8"
+    echo "  [cuDNN] so.8(TRT)+so.9(torch) 공존 복구 완료 — $CUDNN_LIB"
+  fi
   [ "$BUILD_TRT" = 1 ] \
     && echo "  [GPU] 비-Ampere(cc=$CC) → custom TRT 엔진 빌드 예정(cvt_onnx_to_trt). 프리빌트는 Ampere 전용." \
     || echo "  [GPU] Ampere(cc=$CC) → 프리빌트 TRT 8.6.1 + cuDNN8 엔진."

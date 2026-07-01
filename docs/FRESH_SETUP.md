@@ -1,4 +1,4 @@
-# callone 새 인스턴스 원샷 세팅 (A100/4090)
+# callone 새 인스턴스 원샷 세팅 (A100/4090/3090/3090Ti)
 
 ## TL;DR — 이 두 줄로 끝
 
@@ -63,7 +63,9 @@ bash scripts/setup_avatar_gpu.sh
 - 함정 자동처리:
   - 시스템 libs(GL/X11/오디오: `libGLESv2.so.2` 등) `sudo apt`
   - Ditto import 스캔 → 누락 파이썬 모듈 일괄 설치(filetype·cython·onnxruntime·cuda-python 등)
-  - **TensorRT 8.6.1 고정**(최신 TRT는 드라이버535에 `CUDA error 35` + 프리빌트 엔진 비호환) + **cuDNN8**(TRT8.6용, 토치 cuDNN9와 soname 달라 공존)
+  - **TensorRT 8.6.1 고정**(최신 TRT는 드라이버535에 `CUDA error 35` + 프리빌트 엔진 비호환) + **cuDNN8**(TRT8.6용)
+    → cuDNN8 pip 설치가 torch 의 cuDNN9(같은 패키지)를 밀어내 `libcudnn.so.9 없음`(RTX3090 실측)이 되므로,
+    setup 이 **cuDNN9 재설치 + so.8 보존**으로 so.8(TRT)·so.9(torch)를 **실제 공존** 복구(자동)
   - **DITTO_* env**(`~/.bashrc`): TRT(Ampere+trt_online) 우선, 없으면 PyTorch
   - ⚠️ **Ampere(A100/3090 등)면 얼굴이 움직임(TRT). 4090(Ada)은 PyTorch가 0프레임(미동작)** → 아래 "알아둘 것" 참고,
     4090에선 `AVATAR_BACKEND=static`(음성+정지사진)으로
@@ -78,9 +80,12 @@ health 4개 다 `ok`(+`avatar: backend:ditto`, `cosy: ok`) 확인. cosy 모델�
 ## 5) UI (별 터미널, 인스턴스 안에서)
 ```bash
 cd ~/callone/ui
-# Node 없으면 설치. root 컨테이너(RunPod)면 sudo 없음 → 그냥 실행, Elice 등 sudo 있으면 sudo.
-command -v npm >/dev/null || { SUDO=""; command -v sudo >/dev/null && SUDO="sudo -E"; \
-  curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO bash - && ${SUDO:+sudo }apt-get install -y nodejs; }
+# install.sh 를 돌렸으면 Node 20 은 이미 설치됨(자동). 수동일 때만(npm 없거나 Node<18):
+# ⚠️ NodeSource(curl|bash)·apt 는 컨테이너서 자주 실패(파이프 깨짐 curl:23·Node12 설치·npm 미포함, RTX3090 실측)
+#    → 공식 바이너리 tarball 을 /usr/local 에 직접 푸는 방식이 안전(sudo/apt 불필요).
+command -v npm >/dev/null || {
+  curl -fsSL https://nodejs.org/dist/v20.18.1/node-v20.18.1-linux-x64.tar.gz -o /tmp/node.tar.gz \
+    && tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 && hash -r; }
 npm install && npm run dev       # 평범하게(VITE_BASE 붙이지 말 것). Local: http://localhost:5173/ 떠야 정상.
 ```
 ⚠️ **`VITE_BASE=/proxy/5173/` 붙이지 마라** — SSH 터널로 접속하면 localhost 직결이라 그 prefix 가 라우팅을 깨서 빈 화면 나온다. 그냥 `npm run dev`.

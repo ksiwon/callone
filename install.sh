@@ -94,13 +94,24 @@ _hdr "4/4  UI (npm)"
 if [ "$SKIP_UI" = "1" ]; then
   R_UI="skip"; _warn "SKIP_UI=1 — 나중에 직접: cd ui && npm run dev"
 else
-  # npm 없으면 Node.js 설치
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "  npm 없음 — Node.js 20 설치 시도..."
-    SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo -E"
-    curl -fsSL https://deb.nodesource.com/setup_20.x | ${SUDO:-bash} bash - 2>/dev/null \
-      && ${SUDO:+sudo }apt-get install -y nodejs 2>/dev/null \
-      || _warn "Node.js 자동 설치 실패. 수동: apt-get install nodejs"
+  # npm 없거나 Node<18 이면 Node.js 20 설치.
+  # NodeSource(curl|bash)·apt 는 컨테이너서 자주 실패(파이프 깨짐 curl:23·구버전 Node12·npm 미포함, RTX3090 실측)
+  # → 공식 바이너리 tarball 을 /usr/local 에 직접 푸는 방식이 가장 안정적(sudo/apt 불필요, /usr/local/bin 이 PATH 우선).
+  _node_ok() {
+    command -v npm >/dev/null 2>&1 || return 1
+    local maj; maj="$(node -v 2>/dev/null | sed 's/^v\([0-9]*\).*/\1/')"
+    [ "${maj:-0}" -ge 18 ] 2>/dev/null
+  }
+  if ! _node_ok; then
+    echo "  Node.js 20 설치(공식 바이너리 tarball)..."
+    NODE_VER="v20.18.1"; NODE_ARCH="x64"
+    case "$(uname -m)" in aarch64|arm64) NODE_ARCH="arm64";; esac
+    if curl -fsSL "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-linux-$NODE_ARCH.tar.gz" -o /tmp/node.tar.gz \
+       && tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1; then
+      hash -r; _ok "Node $(node -v) / npm $(npm -v)"
+    else
+      _warn "Node.js 자동 설치 실패 — 수동: https://nodejs.org 바이너리를 /usr/local 에 풀기"
+    fi
   fi
   if command -v npm >/dev/null 2>&1; then
     echo "  npm $(npm --version) — 의존성 설치 중..."

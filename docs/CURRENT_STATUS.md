@@ -1,6 +1,23 @@
 # callone 현재 상태
 
-> 정본 날짜: 2026-06-23. 과거 모델 검토와 구현 전 설계는 `legacy/design/`에 보관한다.
+> 정본 날짜: 2026-07-02. 과거 모델 검토와 구현 전 설계는 `legacy/design/`에 보관한다.
+
+## 설치 환경 실측 (2026-07-02, RTX 3090 Ti · RunPod)
+
+RunPod RTX 3090 Ti(Ampere cc 8.6, 24GB)에서 `install.sh` 원샷으로 음성+영상 통화까지 동작 확인.
+GPU 선택 기준: 세 후보(3090/3090Ti/4090) 모두 24GB라 LLM은 EXAONE-3.5-7.8B로 동일(32B 불가).
+**아바타 Ditto 프리빌트 TRT 엔진이 Ampere 전용**이라 3090/3090Ti가 무빌드로 바로 동작(4090=Ada는
+custom TRT 재빌드 필요). 3090Ti가 3090 대비 RAM 72GB/vCPU 16 여유(멀티 서비스 4개)로 스윗스팟.
+
+설치 중 발견·수정한 두 함정(코드 반영 완료):
+
+1. **Node.js** — NodeSource `curl|bash`가 컨테이너서 파이프 깨짐(`curl:23`)으로 실패하고,
+   수동 `apt-get install nodejs`는 **Node 12(구버전)+npm 미포함**을 깔아 Vite(Node18+) 불가.
+   → `install.sh`/`FRESH_SETUP.md`를 **공식 바이너리 tarball을 /usr/local에 직접 푸는 방식**으로 교체.
+2. **cuDNN 8/9 충돌** — `setup_avatar_gpu.sh`가 torch(cuDNN9) 설치 뒤 TRT용 cuDNN8을 **같은 pip
+   패키지**로 덮어써 `libcudnn.so.9 없음`으로 torch import 실패(아바타 static 폴백).
+   → cuDNN9 재설치 + so.8 파일 보존으로 **so.8(TRT)·so.9(torch) 실제 공존** 복구(자동).
+   ※ tensorrt 메타패키지 `bdist_wheel` 에러는 `|| true`로 무시(libs/bindings는 정상)—기존 의도, 무해.
 
 ## 현행 스택
 
