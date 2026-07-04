@@ -59,6 +59,120 @@
 
 ---
 
+## 워크플로우 (전체 진행 과정)
+
+### 0. 큰 그림 — 4개 서비스 데이터 흐름
+
+```
+┌─────────────┐   WebSocket(:8000)    ┌──────────────────────────────────────────┐
+│  브라우저 UI │◄─────────────────────►│           callone-serve (오케스트레이터)   │
+│  (React)    │   오디오/이벤트/프레임  │           .venv-serve · faster-whisper      │
+└─────────────┘                        │                                            │
+   ▲  마이크 PCM                        │  VAD → ASR → LLM → TTS → (아바타) → 스피커  │
+   │  스피커 PCM + 얼굴 프레임           └───┬───────────┬───────────────┬──────────┘
+   │                                        │HTTP       │HTTP           │HTTP
+   │                              ┌─────────▼──┐  ┌─────▼───────┐  ┌────▼────────┐
+   │                              │llama-server│  │cosyvoice-srv│  │avatar-server│
+   └── 개인데이터는 브라우저 소유   │  :8090     │  │  :8092      │  │  :8091      │
+       (서버는 인메모리, 종료 즉시  │ EXAONE LLM │  │ CosyVoice3  │  │ Ditto(TRT)  │
+        폐기 — 디스크/로그 0)      └────────────┘  └─────────────┘  └─────────────┘
+```
+
+- 무거운 스택(torch/conda/TensorRT)끼리 의존성 충돌을 피하려 **각자 별 프로세스**로 띄우고 HTTP/WS로만 붙인다.
+- `callone-serve`(`.venv-serve`)에는 torch/cosyvoice가 **없다** — 전부 원격 호출.
+
+### 1. 부팅 (서비스 기동 + 워밍업)
+
+```
+run_all.sh → llama-server(:8090) · cosyvoice-server(:8092) · avatar-server(:8091) · callone-serve(:8000)
+                                         │
+        각 서비스 health 통과 후 ────────►  Orchestrator 생성 시 warmup=true 면 더미 1회 예열:
+                                            ASR(무음 전사) + LLM(짧은 프롬프트) + TTS(짧은 합성)
+                                            → CUDA graph 빌드 · llama 슬롯 · ref 인코딩 캐시 예열
+                                            → 첫 통화 턴의 콜드스타트(수 초)를 부팅 시간으로 이동
+```
+
+`callone/serve/orchestrator.py`의 `Orchestrator.__init__` → `warmup()`. 목소리/출력엔 영향 0(더미 폐기).
+
+### 2. 통화 시작 — `session_init` (전부 인메모리)
+
+브라우저가 통화를 열 때 WS로 `session_init` 메시지를 보낸다. `callone/serve/app.py`의 `_parse_session_init` → `Orchestrator.init_session()`이 **별 스레드(executor)** 에서 세션을 구성한다("연결 중" 동안 처리, 이벤트 루프 안 막음).
+
+| 프론트가 보내는 것 | 하는 일 |
+|---|---|
+| `ref_audio_b64` (5~10초 음성) | 목소리 복제 레퍼런스 → `set_reference`(인메모리 b64, `/dev/shm`) |
+| `nsfw: true` (선택) | 섹시/ASMR 모드 → `tts.nsfw_ref_path` 프리셋 레퍼런스로 **교체**(설정 시. 프론트 음성 무시, 미설정이면 폴백) |
+| `portrait_b64` (사진 1장) | 얼굴 → avatar-server 세션 시작 + 첫 프레임 콜드(~30s) 예열 |
+| `persona`/`situation`/캐릭터 카드 | 상황극 페르소나 → LLM `set_context` |
+| `history` (이전 대화) | 대화 이력 복원(클라가 보관·복원, 서버엔 안 남김) |
+
+레퍼런스가 잡히면 세션 ref로 TTS CUDA graph를 미리 캡처(~10s) → 첫 턴 콜드 제거.
+
+### 3. 한 턴의 진행 — `stream_turn()` 이벤트 스트림
+
+사용자가 말을 끝내면(VAD가 말끝 감지) 그 발화 오디오로 `Orchestrator.stream_turn(audio)`가 돌며, WS로 이벤트를 **나오는 대로** 흘린다(첫 음성 빠르게):
+
+```mermaid
+sequenceDiagram
+    participant U as 브라우저(UI)
+    participant O as callone-serve
+    participant L as llama-server(LLM)
+    participant T as cosyvoice(TTS)
+    participant A as avatar(Ditto)
+
+    U->>O: 발화 오디오(말끝까지)
+    O->>O: VAD → ASR(faster-whisper)
+    O-->>U: ("user", 전사 텍스트)
+    O->>L: 프롬프트(페르소나+이력) 스트리밍
+    L-->>O: 문장 토큰들
+    O->>O: _parse_emotion(감정 추출) · _strip_unspoken(이모지/괄호/한자·태그 제거)
+    O-->>U: ("emotion", 감정) · ("text", 최종 응답)
+    O->>T: 합성 요청(synth_mode=full: 응답 통째 1회 → 음색 일관)
+    T-->>O: f32 PCM 청크(스트리밍)
+    O-->>U: ("latency", 첫음성 ms) · ("audio", 청크) ...
+    O->>A: 세그먼트 전체 오디오 → 얼굴 프레임(오디오=마스터 클럭, 25fps)
+    A-->>O: 프레임들
+    O-->>U: ("frame", 얼굴 프레임) ...
+    O-->>U: ("timing", 단계별 ms) · ("end", 응답)
+```
+
+핵심 동작:
+- **문장 스트리밍**: LLM 응답을 모으되, 합성은 `synth_mode`로 제어 — `full`(통째 1회, 운율·음색 일관, 기본) / `sentence`(문장별, 첫음성 최저지연).
+- **입으로 못 읽는 것 제거**: `_strip_unspoken`이 이모지·괄호 해설(`(웃으며)`)·한자·대괄호 태그를 발화 직전 정제(TTS 오발음 차단).
+- **barge-in**: 클론이 말하는 중 사용자가 말하면 `interrupt()` → 진행 중 LLM/TTS/아바타 스트림을 즉시 중단하고 `("interrupted", None)`.
+- **아바타는 선택 레이어**: 없거나 실패해도 음성은 그대로 진행(정지 사진/음성전용 폴백).
+
+### 4. 지연 구조 (어디서 시간 먹나)
+
+`("timing", …)` 이벤트로 매 턴 단계별 ms를 측정한다(목소리 영향 0, 병목 진단용):
+
+```
+첫 음성 지연 = ASR ─→ LLM 첫 문장 ─→ TTS 첫 청크
+               (전사)   (llama 생성)   (cosyvoice 합성, 최대 단일 병목)
+```
+
+- TTS 첫 청크가 보통 최대 병목 → `stream`(네이티브 bistream) + `chunk_size`(작을수록 첫음성↓, 음색 거의 불변)로 조절. 라이브 끊김은 저장 wav A/B로 안 보이니 실통화로 확인 후 내린다.
+
+### 5. 통화 종료 — `cleanup_session`
+
+인메모리 개인데이터를 **즉시 폐기**: TTS 레퍼런스(`/dev/shm` 삭제) · 대화 이력 · 아바타 세션 해제. 디스크 파일·로그 본문 흔적 0. 대화 이력은 브라우저가 내보내기로 보관.
+
+### 6. 섹시/ASMR(nsfw) 모드 — 레퍼런스만 교체
+
+CosyVoice3 **제로샷 메커니즘을 그대로** 쓰되(Piper/RVC로 교체 안 함), breathy/속삭임 프리셋 클립을 레퍼런스로 준다:
+
+```
+configs/serve.yaml:  tts.nsfw_ref_path / nsfw_ref_text  (5~15초 mono wav + 전사)
+        │
+session_init(nsfw:true) ─→ use_nsfw_reference() ─→ 프리셋 클립을 set_reference
+        │                                            (경로 비면 프론트 음성으로 폴백)
+        └─ 태그([breath]/[moan])는 별개: scripts/tag_ab_test.py 로 이 체크포인트가 파싱하는지 먼저 검증
+```
+
+프리셋은 개인데이터가 아닌 고정 자산이라 인메모리 로드해도 프라이버시 설계는 그대로다.
+
+---
+
 ## 빠른 실행 (이미 세팅된 인스턴스)
 ```bash
 cd ~/callone && source ~/.bashrc
