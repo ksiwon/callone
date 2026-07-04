@@ -39,6 +39,17 @@ else
   echo "[cosy] cosyvoice env 없음 → TTS 는 Piper/Kokoro 폴백(scripts/setup_cosyvoice_gpu.sh 로 설치 권장)."
 fi
 
+# DITTO_* env 자가치유: run_all 을 `source ~/.bashrc` 없이 돌려도 Ditto 가 뜨게 한다(=static 폴백의
+#   1위 원인 제거). 비대화형 셸이라 `source ~/.bashrc` 는 PS1 가드에 막히므로 DITTO_ 줄만 뽑아
+#   set -a(자동 export)로 eval → avatar-server 서브셸이 상속. 이미 env 에 있으면 건너뜀.
+if [ "$AVATAR_BACKEND" = "ditto" ] && [ -z "${DITTO_REPO:-}" ] && [ -f "$HOME/.bashrc" ]; then
+  set -a
+  eval "$(grep -E '^[[:space:]]*(export[[:space:]]+)?DITTO_[A-Za-z_]+=' "$HOME/.bashrc" 2>/dev/null | sed -E 's/^[[:space:]]*export[[:space:]]+//')"
+  set +a
+  if [ -n "${DITTO_REPO:-}" ]; then echo "[2/3] DITTO_* env 자동 로드(.bashrc) — Ditto 준비"
+  else echo "[2/3] ⚠️ DITTO_* env 못 찾음 → static 폴백 예상. setup_avatar_gpu.sh 먼저 돌려라."; fi
+fi
+
 # ② avatar-server (.venv-avatar)
 pkill -f "avatar_server" 2>/dev/null; sleep 1
 if [ -d .venv-avatar ]; then
@@ -76,6 +87,12 @@ _wait() {
 echo "--- health (서비스별 최대 30~60s 대기) ---"
 _wait "llama"   "http://127.0.0.1:$PORT_LLM/health" 60
 _wait "avatar"  "http://127.0.0.1:8091/health"       30
+# Ditto 요청했는데 static 으로 떴으면(움직임 없음) 크게 경고 + 고침 안내(조용히 폴백해 헷갈리는 것 방지).
+if [ "$AVATAR_BACKEND" = "ditto" ] && curl -s "http://127.0.0.1:8091/health" 2>/dev/null | grep -q '"backend":"static"'; then
+  echo "  ⚠️⚠️ avatar 가 static 으로 떴다(얼굴 안 움직임). 원인=DITTO_* env 미로드. 고침:"
+  echo "        source ~/.bashrc && pkill -9 -f avatar_server && bash scripts/run_all.sh"
+  echo "        그래도 static 이면: bash scripts/setup_avatar_gpu.sh (env/체크포인트 재설정) — 로그: grep 'Ditto 로드 실패' $LOG/avatar.log"
+fi
 _wait "serve"   "http://127.0.0.1:8000/api/health"   30
 _wait "cosy"    "http://127.0.0.1:8092/health"       60
 cat <<EOF

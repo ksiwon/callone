@@ -116,6 +116,35 @@ bash scripts/run_all.sh          # 다 떠 있으면 health만, 죽은 것만 �
 ```
 종료: `bash scripts/run_all.sh stop`
 
+## 자주 막히는 곳 (Troubleshooting) — 실측으로 걸린 것들
+
+**① 얼굴이 안 움직임 / avatar 가 `static` 으로 뜸**
+- 원인: `DITTO_*` 환경변수(엔진 경로)가 avatar-server 에 없음 → Ditto 로드 실패 → static 폴백.
+  대개 **`run_all.sh` 를 `source ~/.bashrc` 없이** 돌려서(비대화형 셸이라 bashrc 가드에 막힘).
+- 이제 `run_all.sh` 가 `.bashrc` 에서 `DITTO_*` 를 **자동 로드**하고, static 이면 **경고**한다. 그래도 안 되면:
+  ```bash
+  curl -s 127.0.0.1:8091/health; echo          # {"backend":"static"} 면 아직 폴백
+  source ~/.bashrc && env | grep -i DITTO       # DITTO_REPO/DATA_ROOT/CFG_PKL 떠야 함
+  grep "Ditto 로드 실패" ~/avatar.log            # 실패 사유(env 미설정 / TRT / checkpoint)
+  # env 자체가 없으면(setup 미완):  bash scripts/setup_avatar_gpu.sh
+  pkill -9 -f avatar_server && bash scripts/run_all.sh
+  ```
+  목표: `curl :8091/health` → `{"backend":"ditto"}`. (3090 Ti=Ampere 는 프리빌트 엔진이라 빌드 불필요.)
+
+**② SSH 가 비번 계속 물음 (RunPod, 키 넣었는데도)**
+- 원인: RunPod 은 계정 공개키를 **팟 시작 시** 주입한다. **이미 켜져 있는 팟**엔 나중에 등록한 키가 안 들어감.
+- 고침(재시작 없이): **Web Terminal** 열어서 공개키를 직접 authorized_keys 에 —
+  ```bash
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  echo "ssh-ed25519 AAAA... me@host" >> ~/.ssh/authorized_keys   # 로컬 id_ed25519.pub 내용
+  chmod 600 ~/.ssh/authorized_keys
+  ```
+  (또는 Settings→SSH Public Keys 등록 후 팟 Stop→Start.) 무passphrase 키여야 진짜 비번 0.
+
+**③ SSH 터널이 `Connection refused`**
+- 원인: `known_hosts` 에 남은 **옛 포트**로 붙음. 포트는 팟마다 바뀐다.
+- 고침: RunPod **Connect → Direct TCP** 의 **지금 포트**로. `~/.ssh/config` 별칭 만들어 두면 편함(FRESH_SETUP 6번).
+
 ## 알아둘 것
 - **첫 턴 영상은 콜드(~30s, TRT 첫 추론)** — 이후 턴은 RTF<1로 빠름. 정상.
 - **A/V 동기**: 음성이 영상 생성을 기다렸다 같이 재생(입싱크 우선). 음성전용(사진 미업로드)이면 지연 없음.
