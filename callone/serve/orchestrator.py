@@ -341,14 +341,38 @@ class Orchestrator:
         self.history = []
 
     # ----- 프라이버시 세션(인메모리, 디스크·로그 영속 0) ------------------
+    def _apply_session_reference(self, nsfw: bool, ref_audio, ref_sr: int, ref_text) -> bool:
+        """세션 TTS 레퍼런스 선택. NSFW 모드면 고정 섹시/ASMR 프리셋 레퍼런스 우선(설정+백엔드
+        지원 시), 미설정/실패/일반모드면 프론트 음성. ref 잡히면 True(호출측이 CUDA graph 예열).
+        set_reference/use_nsfw_reference 없는 백엔드(Piper/Kokoro)는 getattr 로 안전 무시."""
+        if nsfw:
+            fn = getattr(self.tts, "use_nsfw_reference", None)
+            if callable(fn):
+                try:
+                    if fn():
+                        log.info("NSFW 모드 — 고정 섹시 레퍼런스 사용")
+                        return True
+                except Exception as e:  # noqa: BLE001
+                    log.warning("NSFW 레퍼런스 실패(%s) — 프론트 음성 폴백", e)
+        if ref_audio is not None:
+            fn = getattr(self.tts, "set_reference", None)
+            if callable(fn):
+                try:
+                    fn(ref_audio, ref_sr, ref_text)
+                    return True
+                except Exception as e:  # noqa: BLE001
+                    log.warning("세션 ref 설정 실패(%s)", e)
+        return False
+
     def init_session(self, *, ref_audio=None, ref_sr: int = 24000, ref_text=None,
                      portrait=None, persona=None, situation=None, history=None,
                      personality=None, background=None, first_message=None,
-                     example_dialogue=None, user_persona=None):
+                     example_dialogue=None, user_persona=None, nsfw: bool = False):
         """통화 시작 — 프론트가 보낸 개인데이터로 세션 구성(전부 **인메모리**).
 
         ref_audio: 화자 음성 ndarray(목소리 복제) / portrait: 사진 bytes(얼굴) /
         캐릭터 카드(personality/background/first_message/example_dialogue/user_persona) = 상황극 페르소나.
+        nsfw: 섹시/ASMR 모드 — tts.nsfw_ref_path 설정 시 그 프리셋 레퍼런스로 교체(프론트 음성 무시).
         history: 이전 대화(클라가 보관·복원). 디스크 파일 안 만들고 로그에 본문 안 남긴다.
         통화 끝나면 cleanup_session() 으로 즉시 폐기."""
         self.reset_history()
@@ -359,19 +383,17 @@ class Orchestrator:
                  "user_persona": user_persona}
         if (persona and persona.strip()) or (situation and situation.strip()) or any(v and str(v).strip() for v in _card.values()):
             self.set_context(persona=persona or None, situation=situation or None, **_card)
-        # 목소리(인메모리 ref) — TTS 백엔드가 지원하면.
-        if ref_audio is not None:
-            fn = getattr(self.tts, "set_reference", None)
-            if callable(fn):
+        # 목소리(인메모리 ref) — NSFW 프리셋 또는 프론트 음성. TTS 백엔드가 지원하면.
+        if ref_audio is not None or nsfw:
+            ref_set = self._apply_session_reference(nsfw, ref_audio, ref_sr, ref_text)
+            # 세션 ref 로 TTS CUDA graph 미리 캡처(~10s) → **첫 턴 콜드 제거**.
+            # init_session 은 executor(별 스레드)서 도니 이벤트 루프 안 막음. "연결 중" 동안 처리.
+            if ref_set and getattr(self.tts, "ref_wav", None):
                 try:
-                    fn(ref_audio, ref_sr, ref_text)
-                    # 세션 ref 로 TTS CUDA graph 미리 캡처(~10s) → **첫 턴 콜드 제거**.
-                    # init_session 은 executor(별 스레드)서 도니 이벤트 루프 안 막음. "연결 중" 동안 처리.
-                    if getattr(self.tts, "ref_wav", None):
-                        for _ in _tts_stream_emo(self.tts, "네, 안녕하세요.", "neutral"):
-                            pass
+                    for _ in _tts_stream_emo(self.tts, "네, 안녕하세요.", "neutral"):
+                        pass
                 except Exception as e:  # noqa: BLE001
-                    log.warning("세션 ref 설정/예열 실패(%s)", e)
+                    log.warning("세션 ref 예열 실패(%s)", e)
         # 얼굴(사진 bytes) — avatar 켜져 있을 때만 세션 아바타 구성.
         if portrait is not None and bool((self._cfg.get("avatar") or {}).get("enabled", False)):
             try:
@@ -414,82 +436,23 @@ class Orchestrator:
         log.info("세션 종료 — 인메모리 개인데이터 폐기 완료")
 
     def handle_utterance(self, audio: np.ndarray, sr: int = 16000) -> Turn:
-        """완결된 발화 → 응답 텍스트 + 음성 청크 (문장 스트리밍, barge-in 존중)."""
-        self._interrupt.clear()
-        t0 = time.time()
-        user_text = self.asr.transcribe(audio, sr)
-        t_asr = time.time()
-        turn = Turn(user_text=user_text)
-        if not user_text.strip():
-            turn.timings = {"asr_ms": (t_asr - t0) * 1000}
-            return turn
-
-        # 1) LLM 응답 전체 수집(감정은 첫 감정 유지). 전화 응답은 짧아 수집 비용 작음.
-        emotion = "neutral"
-        parts: list[str] = []
-        t_llm_first = 0.0
-        for sentence in self.llm.chat_stream(user_text, self.history):
-            if not t_llm_first:
-                t_llm_first = time.time()
-            if self._interrupt.is_set():
+        """완결된 발화 → 응답 텍스트 + 음성 청크(논스트리밍 Turn). **stream_turn 을 소비**해 취합하는
+        벤치/배치용 어댑터 — 라이브(stream_turn)와 턴 로직을 단일화해 중복/드리프트를 없앤다."""
+        turn = Turn(user_text="")
+        for kind, val in self.stream_turn(audio, sr):
+            if kind == "user":
+                turn.user_text = val
+            elif kind == "text":
+                turn.reply_text = val
+            elif kind == "latency":
+                turn.first_audio_latency_ms = val
+            elif kind == "audio":
+                turn.audio_chunks.append(val)
+            elif kind == "interrupted":
                 turn.interrupted = True
-                break
-            emotion, clean = _parse_emotion(sentence, emotion)   # §4-1 감정 추출
-            clean = _strip_unspoken(clean)                       # 이모지·괄호해설 제거(입으로 못 읽는 것)
-            if clean:
-                parts.append(clean)
-        t_llm_done = time.time()
-        turn.reply_text = " ".join(parts)
-
-        # 2) 합성: full = 응답 통째 1회(운율 일관·톤 안 튐, 구두점 자연 텀) /
-        #          sentence = 문장별 + 사이 무음(저지연). barge-in 은 청크마다 존중.
-        t_tts_first = 0.0
-        if parts and not turn.interrupted:
-            sr_out = getattr(self.tts, "sr", 24000)
-            segments = [turn.reply_text] if self.synth_mode == "full" else parts
-            first = False
-            for i, seg in enumerate(segments):
-                if i > 0 and self.sentence_pause_ms > 0:
-                    turn.audio_chunks.append(_silence(sr_out, self.sentence_pause_ms))
-                for chunk in _tts_stream_emo(self.tts, seg, emotion):
-                    if self._interrupt.is_set():
-                        turn.interrupted = True
-                        break
-                    if not first:
-                        t_tts_first = time.time()
-                        turn.first_audio_latency_ms = (t_tts_first - t0) * 1000
-                        first = True
-                    turn.audio_chunks.append(chunk)
-                if turn.interrupted:
-                    break
-
-        # 단계별 시계: 어디서 시간 먹는지(ASR vs LLM vs TTS) 병목 진단(목소리 영향 0).
-        turn.timings = {
-            "asr_ms": (t_asr - t0) * 1000,
-            "llm_first_ms": (t_llm_first - t_asr) * 1000 if t_llm_first else 0.0,
-            "llm_total_ms": (t_llm_done - t_asr) * 1000,
-            "tts_first_ms": (t_tts_first - t_llm_done) * 1000 if t_tts_first else 0.0,
-            "first_audio_ms": turn.first_audio_latency_ms,
-        }
-
-        if turn.reply_text:
-            self.history.append({"role": "user", "content": user_text})
-            self.history.append({"role": "assistant", "content": turn.reply_text})
-        tm = turn.timings
-        if self.log_content:   # 디버그 전용(기본 off) — 평소엔 본문 로그 0
-            log.info("턴: '%s' → '%s' (첫음성 %.0fms = ASR %.0f + LLM첫 %.0f + TTS첫 %.0f%s)",
-                     user_text[:30], turn.reply_text[:40], turn.first_audio_latency_ms,
-                     tm.get("asr_ms", 0), tm.get("llm_first_ms", 0), tm.get("tts_first_ms", 0),
-                     ", 중단됨" if turn.interrupted else "")
-        else:                  # 프라이버시: 본문 없이 길이·지연만
-            log.info("턴 완료(usr %d자→rep %d자, 첫음성 %.0fms = ASR %.0f + LLM첫 %.0f + TTS첫 %.0f%s)",
-                     len(user_text), len(turn.reply_text), turn.first_audio_latency_ms,
-                     tm.get("asr_ms", 0), tm.get("llm_first_ms", 0), tm.get("tts_first_ms", 0),
-                     ", 중단됨" if turn.interrupted else "")
+            elif kind == "timing":
+                turn.timings = val
         return turn
-
-    def stream_audio_chunks(self, audio: np.ndarray, sr: int = 16000) -> Iterator[np.ndarray]:
-        yield from self.handle_utterance(audio, sr).audio_chunks
 
     def stream_turn(self, audio: np.ndarray, sr: int = 16000) -> Iterator[tuple]:
         """이벤트 제너레이터 — app(WS)이 실시간 송출 + barge-in 감지에 사용.

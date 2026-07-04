@@ -198,6 +198,7 @@ export default function CallScreen() {
   const [firstMessage, setFirstMessage] = useState(""); // 첫 마디 (greeting)
   const [exampleDialogue, setExampleDialogue] = useState(""); // 예시 말투 (example messages)
   const [userPersona, setUserPersona] = useState("");   // 나는 누구 (관계 기준)
+  const [nsfw, setNsfw] = useState(false);              // 섹시/ASMR 모드(서버 프리셋 breathy 레퍼런스)
   const historyRef = useRef<Turn[]>([]);
 
   // 단계형 셋업 상태
@@ -212,7 +213,6 @@ export default function CallScreen() {
   const sockRef = useRef<CallSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);     // 마이크 캡처(16kHz)
   const playCtxRef = useRef<AudioContext | null>(null);      // 재생 전용(24kHz, TTS 출력 sr)
-  const playheadRef = useRef<number>(0);                     // 다음 청크 재생 시작시각(누적)
   const turnAudioRef = useRef<Float32Array[]>([]);           // 한 턴 오디오 버퍼(A/V 동기 재생용)
   const turnFramesRef = useRef<string[]>([]);                // 한 턴 프레임 버퍼(같은 턴)
   const canvasRef = useRef<HTMLCanvasElement | null>(null);  // 프레임 그리기(canvas=디코딩 우회, 부드러움)
@@ -274,6 +274,7 @@ export default function CallScreen() {
       first_message: firstMessage || undefined,
       example_dialogue: exampleDialogue || undefined,
       user_persona: userPersona || undefined,
+      nsfw: nsfw || undefined,
       history: historyRef.current.length ? historyRef.current : undefined,
     };
     if (voiceFile) init.ref_audio_b64 = await fileToBase64(voiceFile);
@@ -413,7 +414,7 @@ export default function CallScreen() {
     try { playCtxRef.current?.close(); } catch { /* noop */ }
     try { previewCtxRef.current?.close(); } catch { /* noop */ }
     if (photoUrl) URL.revokeObjectURL(photoUrl);
-    playCtxRef.current = null; playheadRef.current = 0;
+    playCtxRef.current = null;
     nav("/");
   }
 
@@ -481,6 +482,11 @@ export default function CallScreen() {
           </>)}
 
           {step === 3 && (<>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: nsfw ? "#f7768e" : undefined }}>
+              <input type="checkbox" checked={nsfw} onChange={(e) => setNsfw(e.target.checked)} />
+              🔥 섹시 / ASMR 모드 — breathy 프리셋 목소리로 대화
+            </label>
+            {nsfw && <Note>서버에 등록된 프리셋 목소리(tts.nsfw_ref_path)로 말해요. 미등록이면 올린 목소리 그대로 진행돼요.</Note>}
             <label>예시 캐릭터 빠르게 넣기 (누르면 아래 칸이 채워져요 — 자유롭게 수정)</label>
             <PresetRow>
               {PRESETS.map((p) => (

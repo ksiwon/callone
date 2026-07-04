@@ -13,7 +13,7 @@ import numpy as np
 
 from callone.serve.llama_llm import LlamaPersonaLLM
 from callone.serve.tts_cosyvoice import CosyVoiceTTS, _read_exactly
-from callone.serve.orchestrator import Orchestrator
+from callone.serve.orchestrator import Orchestrator, Turn
 
 
 # ----- 작업2: 샘플러(DRY/min_p) ----------------------------------------------
@@ -129,3 +129,92 @@ def test_warmup_avatar_noop_when_none():
     fake.avatar = None
     fake.tts = _Tts()
     fake._warmup_avatar()                           # 예외 없이 즉시 반환
+
+
+# ----- 섹시/ASMR 모드: 세션 레퍼런스 선택(우선순위1) --------------------------
+class _RefTts:
+    sr = 24000
+
+    def __init__(self, has_nsfw=True):
+        self.calls: list = []
+        self._has_nsfw = has_nsfw
+        self.ref_wav = ""
+
+    def use_nsfw_reference(self):
+        self.calls.append(("nsfw",))
+        if self._has_nsfw:
+            self.ref_wav = "memory"
+            return True
+        return False
+
+    def set_reference(self, a, sr, t=None):
+        self.calls.append(("caller", len(a), sr))
+        self.ref_wav = "memory"
+
+
+def _fake_orch(tts):
+    o = Orchestrator.__new__(Orchestrator)
+    o.tts = tts
+    return o
+
+
+def test_nsfw_uses_preset_reference_over_caller():
+    """nsfw=True + 프리셋 지원 → 고정 섹시 레퍼런스 사용, 프론트 음성 무시."""
+    tts = _RefTts(has_nsfw=True)
+    ok = _fake_orch(tts)._apply_session_reference(
+        True, np.zeros(16000, dtype=np.float32), 16000, None)
+    assert ok is True
+    assert tts.calls == [("nsfw",)]                 # caller set_reference 호출 안 됨
+
+
+def test_nsfw_falls_back_to_caller_when_no_preset():
+    """nsfw=True 지만 프리셋 미설정(use_nsfw_reference False) → 프론트 음성으로 폴백."""
+    tts = _RefTts(has_nsfw=False)
+    ok = _fake_orch(tts)._apply_session_reference(
+        True, np.zeros(8000, dtype=np.float32), 16000, None)
+    assert ok is True
+    assert tts.calls == [("nsfw",), ("caller", 8000, 16000)]
+
+
+def test_normal_mode_never_touches_nsfw_reference():
+    """nsfw=False → use_nsfw_reference 안 부르고 프론트 음성만."""
+    tts = _RefTts(has_nsfw=True)
+    ok = _fake_orch(tts)._apply_session_reference(
+        False, np.zeros(4000, dtype=np.float32), 24000, "ref")
+    assert ok is True
+    assert tts.calls == [("caller", 4000, 24000)]
+
+
+def test_no_reference_returns_false():
+    """일반 모드 + 음성 없음 → ref 미설정(False)."""
+    tts = _RefTts(has_nsfw=True)
+    ok = _fake_orch(tts)._apply_session_reference(False, None, 24000, None)
+    assert ok is False
+    assert tts.calls == []
+
+
+# ----- 턴 로직 단일화: handle_utterance = stream_turn 소비 어댑터 --------------
+def test_handle_utterance_adapts_stream_turn_events():
+    """handle_utterance 가 stream_turn 이벤트를 Turn 으로 정확히 취합하는지(중복 제거 회귀)."""
+    fake = Orchestrator.__new__(Orchestrator)
+    events = [("user", "안녕"), ("emotion", "happy"), ("text", "응 안녕"),
+              ("latency", 123.0), ("audio", np.ones(3, dtype=np.float32)),
+              ("audio", np.zeros(2, dtype=np.float32)),
+              ("timing", {"asr_ms": 10, "first_audio_ms": 123.0}), ("end", "응 안녕")]
+    fake.stream_turn = lambda audio, sr=16000: iter(events)   # type: ignore[method-assign]
+    turn = fake.handle_utterance(np.zeros(4, dtype=np.float32), 16000)
+    assert turn.user_text == "안녕"
+    assert turn.reply_text == "응 안녕"
+    assert turn.first_audio_latency_ms == 123.0
+    assert len(turn.audio_chunks) == 2
+    assert turn.timings == {"asr_ms": 10, "first_audio_ms": 123.0}
+    assert turn.interrupted is False
+
+
+def test_handle_utterance_marks_interrupted():
+    fake = Orchestrator.__new__(Orchestrator)
+    fake.stream_turn = lambda audio, sr=16000: iter(   # type: ignore[method-assign]
+        [("user", "x"), ("interrupted", None)])
+    turn = fake.handle_utterance(np.zeros(2, dtype=np.float32), 16000)
+    assert turn.interrupted is True
+    assert turn.reply_text == ""

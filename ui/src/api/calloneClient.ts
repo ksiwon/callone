@@ -94,6 +94,7 @@ export interface SessionInit {
   first_message?: string;    // 첫 마디 (greeting)
   example_dialogue?: string; // 예시 말투
   user_persona?: string;     // 나는 누구(상대 기준 = 관계)
+  nsfw?: boolean;            // 섹시/ASMR 모드 — 서버의 프리셋 breathy 레퍼런스로 교체(tts.nsfw_ref_path)
   history?: Turn[];          // 이전 대화 복원(이어하기)
 }
 
