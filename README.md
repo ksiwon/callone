@@ -171,6 +171,21 @@ session_init(nsfw:true) ─→ use_nsfw_reference() ─→ 프리셋 클립을 s
 
 프리셋은 개인데이터가 아닌 고정 자산이라 인메모리 로드해도 프라이버시 설계는 그대로다.
 
+### 6-1. 준비된 목소리 프리셋(picker) — `data/voice_presets/`
+
+통화 설정 ①단계에서 **"내 목소리 업로드" ↔ "준비된 목소리"** 를 고를 수 있다. 준비된 목소리는 서버의
+`data/voice_presets/<id>.wav` (+ 선택 `<id>.txt` = 전사)를 **자동 탐색**해 드롭다운에 띄운다(설정 편집 불필요).
+`GET /api/voice/presets` → UI 목록, `session_init{preset_id}` → 그 클립을 레퍼런스로 사용.
+
+```bash
+# pod 에 클립 올리기(SCP — git 커밋 금지). data/ 는 gitignore = 공개 레포에 안 올라간다.
+scp -P <포트> -i ~/.ssh/id_ed25519 clip.wav root@<IP>:/workspace/callone/data/voice_presets/sultry_ko.wav
+# (선택) 전사도: .../voice_presets/sultry_ko.txt
+```
+
+> ⚠️ **권리 있는 클립만** — 본인 녹음 / 동의받은 성인 / CC0·라이선스 / 합성. 실존 인물 무단 음성 금지(README 상단 윤리·관할 법규).
+> 클립 파일은 **레포에 커밋하지 말 것**(공개 배포가 된다). 코드(피커)만 저장소, 클립은 서버 로컬 자산.
+
 ---
 
 ## 빠른 실행 (이미 세팅된 인스턴스)

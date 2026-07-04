@@ -95,7 +95,16 @@ export interface SessionInit {
   example_dialogue?: string; // 예시 말투
   user_persona?: string;     // 나는 누구(상대 기준 = 관계)
   nsfw?: boolean;            // 섹시/ASMR 모드 — 서버의 프리셋 breathy 레퍼런스로 교체(tts.nsfw_ref_path)
+  preset_id?: string;        // 준비된 목소리 선택(data/voice_presets/<id>) — 있으면 내 음성 업로드 대신 사용
   history?: Turn[];          // 이전 대화 복원(이어하기)
+}
+
+// 준비된 프리셋 목소리 목록('내 목소리 업로드' 대안). 클립은 서버 로컬, 여긴 id·label 만.
+export interface VoicePreset { id: string; label: string; has_text: boolean }
+
+export async function listVoicePresets(): Promise<VoicePreset[]> {
+  const r = await fetch(`${BASE}/api/voice/presets`);
+  return r.ok ? r.json() : [];
 }
 
 // 실시간 통화 WebSocket. 마이크 오디오(Float32) 업스트림, 음성 청크 다운스트림.

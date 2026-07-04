@@ -67,6 +67,7 @@ def _parse_session_init(ctrl: dict) -> dict:
     kw: dict = {"persona": ctrl.get("persona"), "situation": ctrl.get("situation"),
                 "ref_text": ctrl.get("ref_text"), "history": ctrl.get("history"),
                 "nsfw": bool(ctrl.get("nsfw", False)),
+                "preset_id": ctrl.get("preset_id") or None,
                 # 캐릭터 카드 추가 필드(전부 선택)
                 "personality": ctrl.get("personality"), "background": ctrl.get("background"),
                 "first_message": ctrl.get("first_message"),
@@ -102,6 +103,13 @@ def create_app():
     @app.get("/api/speakers")
     def speakers():
         return list_speakers()
+
+    @app.get("/api/voice/presets")
+    def voice_presets():
+        """준비된 프리셋 목소리 목록(data/voice_presets/*.wav). '내 목소리 업로드' 대안으로 UI 가 표시.
+        클립 자체는 서버 로컬(gitignore) — 목록만 노출(id·label)."""
+        from .voice_presets import list_presets
+        return list_presets()
 
     @app.get("/api/speakers/{sid}/profile")
     def get_profile(sid: str):

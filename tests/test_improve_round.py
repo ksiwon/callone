@@ -151,6 +151,11 @@ class _RefTts:
         self.calls.append(("caller", len(a), sr))
         self.ref_wav = "memory"
 
+    def set_reference_from_file(self, path, ref_text=None):
+        self.calls.append(("file", path, ref_text))
+        self.ref_wav = "memory"
+        return True
+
 
 def _fake_orch(tts):
     o = Orchestrator.__new__(Orchestrator)
@@ -218,3 +223,42 @@ def test_handle_utterance_marks_interrupted():
     turn = fake.handle_utterance(np.zeros(2, dtype=np.float32), 16000)
     assert turn.interrupted is True
     assert turn.reply_text == ""
+
+
+# ----- 프리셋 목소리 레지스트리 + 선택 우선순위 -------------------------------
+def test_voice_presets_list_and_resolve(tmp_path, monkeypatch):
+    monkeypatch.setenv("CALLONE_DATA_DIR", str(tmp_path))
+    from callone.serve import voice_presets as vp
+    assert vp.list_presets() == []                    # 폴더 없을 때
+    d = tmp_path / "voice_presets"; d.mkdir()
+    (d / "sultry_ko.wav").write_bytes(b"RIFFxxxx")
+    (d / "sultry_ko.txt").write_text("아 보고 싶었어", encoding="utf-8")
+    (d / "no_text.wav").write_bytes(b"x")
+    ids = {p["id"] for p in vp.list_presets()}
+    assert ids == {"sultry_ko", "no_text"}
+    r = vp.resolve("sultry_ko")
+    assert r and r[0].endswith("sultry_ko.wav") and r[1] == "아 보고 싶었어"
+    assert vp.resolve("no_text")[1] == ""             # .txt 없으면 빈 문자열
+    assert vp.resolve("missing") is None
+    assert vp.resolve("../secret") is None            # 경로 이탈 차단
+
+
+def test_preset_takes_precedence_over_nsfw_and_caller(monkeypatch):
+    from callone.serve import voice_presets as vp
+    monkeypatch.setattr(vp, "resolve",
+                        lambda pid: ("/x/sultry.wav", "hi") if pid == "sultry" else None)
+    tts = _RefTts(has_nsfw=True)
+    ok = _fake_orch(tts)._apply_session_reference(
+        True, np.zeros(4, dtype=np.float32), 16000, None, preset_id="sultry")
+    assert ok is True
+    assert tts.calls == [("file", "/x/sultry.wav", "hi")]   # nsfw/caller 안 감
+
+
+def test_missing_preset_falls_back_to_nsfw(monkeypatch):
+    from callone.serve import voice_presets as vp
+    monkeypatch.setattr(vp, "resolve", lambda pid: None)
+    tts = _RefTts(has_nsfw=True)
+    ok = _fake_orch(tts)._apply_session_reference(
+        True, None, 16000, None, preset_id="ghost")
+    assert ok is True
+    assert tts.calls == [("nsfw",)]                    # 프리셋 실패 → nsfw 폴백

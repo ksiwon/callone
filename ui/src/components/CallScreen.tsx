@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { useParams, useNavigate } from "react-router-dom";
-import { CallSocket, fileToBase64, previewVoice, type Turn, type SessionInit } from "../api/calloneClient";
+import { CallSocket, fileToBase64, previewVoice, listVoicePresets, type Turn, type SessionInit, type VoicePreset } from "../api/calloneClient";
 
 const Screen = styled.div`
   min-height: 100vh; display: flex; flex-direction: column; align-items: center;
@@ -190,6 +190,10 @@ export default function CallScreen() {
   // 클라가 소유하는 개인데이터(서버 영속 0)
   const [voiceFile, setVoiceFile] = useState<File | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  // 목소리 소스: 내 파일 업로드 vs 서버에 준비된 프리셋 선택
+  const [voiceSource, setVoiceSource] = useState<"own" | "preset">("own");
+  const [presets, setPresets] = useState<VoicePreset[]>([]);
+  const [presetId, setPresetId] = useState("");
   // 캐릭터 카드(character card) 필드 — 실제 캐릭터 챗 사이트(Character.AI/SillyTavern) 표준.
   const [persona, setPersona] = useState("");          // 이름·관계 (description/who)
   const [personality, setPersonality] = useState("");  // 성격·말투 (personality)
@@ -227,6 +231,12 @@ export default function CallScreen() {
       if (raw) historyRef.current = JSON.parse(raw);
     } catch { /* noop */ }
   }, [HKEY]);
+
+  // 서버에 준비된 프리셋 목소리 목록(있으면 '준비된 목소리' 탭에 표시)
+  useEffect(() => { listVoicePresets().then(setPresets).catch(() => setPresets([])); }, []);
+
+  // 목소리 준비됨? (다음/시작 버튼 활성 조건) — 업로드했거나 프리셋 골랐거나
+  const hasVoice = voiceSource === "own" ? !!voiceFile : !!presetId;
 
   useEffect(() => {
     if (!started) return;
@@ -275,9 +285,11 @@ export default function CallScreen() {
       example_dialogue: exampleDialogue || undefined,
       user_persona: userPersona || undefined,
       nsfw: nsfw || undefined,
+      preset_id: voiceSource === "preset" ? (presetId || undefined) : undefined,
       history: historyRef.current.length ? historyRef.current : undefined,
     };
-    if (voiceFile) init.ref_audio_b64 = await fileToBase64(voiceFile);
+    // 내 목소리 모드일 때만 파일 전송(프리셋 모드면 서버 로컬 클립 사용)
+    if (voiceSource === "own" && voiceFile) init.ref_audio_b64 = await fileToBase64(voiceFile);
     if (photoFile) init.portrait_b64 = await fileToBase64(photoFile);
     sock.sessionInit(init);
   }
@@ -463,13 +475,38 @@ export default function CallScreen() {
           <StepHint>{STEP_META[step - 1][1]}</StepHint>
 
           {step === 1 && (<>
-            <label>화자 음성 (7~10초, 깨끗한 wav/mp3)</label>
-            <input type="file" accept="audio/*" onChange={(e) => { setVoiceFile(e.target.files?.[0] ?? null); setPreviewMsg(""); }} />
-            {voiceFile && <Preview onClick={runPreview} disabled={previewing}>{previewing ? "합성 중…" : "🔊 복제 목소리 미리듣기"}</Preview>}
-            {previewMsg && <Note err={previewMsg.startsWith("⚠️")}>{previewMsg}</Note>}
-            {voiceFile && (<>
-              <label>참조 음성 내용 (전사 — 정확할수록 유사도↑, 수정 가능)</label>
-              <input type="text" value={refText} onChange={(e) => setRefText(e.target.value)} placeholder="미리듣기를 누르면 자동으로 채워집니다" />
+            <div style={{ display: "flex", gap: 8 }}>
+              {(["own", "preset"] as const).map((m) => (
+                <button key={m} type="button" onClick={() => setVoiceSource(m)}
+                  style={{ flex: 1, padding: 9, borderRadius: 8, cursor: "pointer", fontWeight: 600,
+                    border: voiceSource === m ? "1px solid #7aa2f7" : "1px solid #2a3a52",
+                    background: voiceSource === m ? "#7aa2f7" : "#0c1422",
+                    color: voiceSource === m ? "#0e1726" : "#fff" }}>
+                  {m === "own" ? "내 목소리 업로드" : `준비된 목소리${presets.length ? ` (${presets.length})` : ""}`}
+                </button>
+              ))}
+            </div>
+
+            {voiceSource === "own" ? (<>
+              <label>화자 음성 (7~10초, 깨끗한 wav/mp3)</label>
+              <input type="file" accept="audio/*" onChange={(e) => { setVoiceFile(e.target.files?.[0] ?? null); setPreviewMsg(""); }} />
+              {voiceFile && <Preview onClick={runPreview} disabled={previewing}>{previewing ? "합성 중…" : "🔊 복제 목소리 미리듣기"}</Preview>}
+              {previewMsg && <Note err={previewMsg.startsWith("⚠️")}>{previewMsg}</Note>}
+              {voiceFile && (<>
+                <label>참조 음성 내용 (전사 — 정확할수록 유사도↑, 수정 가능)</label>
+                <input type="text" value={refText} onChange={(e) => setRefText(e.target.value)} placeholder="미리듣기를 누르면 자동으로 채워집니다" />
+              </>)}
+            </>) : (<>
+              <label>준비된 목소리 선택</label>
+              {presets.length ? (
+                <select value={presetId} onChange={(e) => setPresetId(e.target.value)}
+                  style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #2a3a52", background: "#0c1422", color: "#fff", fontSize: 14 }}>
+                  <option value="">— 목소리 고르기 —</option>
+                  {presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              ) : (
+                <Note>준비된 목소리가 없어요. 서버 data/voice_presets/ 에 wav 를 올리면(scp) 여기 떠요. (권리 있는 클립만)</Note>
+              )}
             </>)}
           </>)}
 
@@ -519,7 +556,7 @@ export default function CallScreen() {
             <label>이전 대화 불러오기 (이어하기) {turns > 0 ? `· 저장된 ${turns}턴 있음` : ""}</label>
             <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importHistory(e.target.files[0])} />
             <Note>
-              {voiceFile ? "✓ 목소리" : "· 목소리 없음"}{photoFile ? " · ✓ 얼굴" : " · 음성통화"}{persona ? ` · ✓ ${persona}` : ""}
+              {hasVoice ? (voiceSource === "preset" ? `✓ 목소리(${presetId})` : "✓ 목소리") : "· 목소리 없음"}{photoFile ? " · ✓ 얼굴" : " · 음성통화"}{persona ? ` · ✓ ${persona}` : ""}
             </Note>
             {turns > 0 && (
               <Controls style={{ justifyContent: "flex-start" }}>
@@ -533,8 +570,8 @@ export default function CallScreen() {
         <Controls>
           {step > 1 ? <Ghost onClick={prev}>← 이전</Ghost> : <Ghost onClick={() => nav("/")}>취소</Ghost>}
           {step < 4
-            ? <Btn onClick={next} disabled={step === 1 && !voiceFile}>다음 →</Btn>
-            : <Btn onClick={startCall} disabled={!voiceFile}>📞 통화 시작</Btn>}
+            ? <Btn onClick={next} disabled={step === 1 && !hasVoice}>다음 →</Btn>
+            : <Btn onClick={startCall} disabled={!hasVoice}>📞 통화 시작</Btn>}
         </Controls>
       </Screen>
     );
