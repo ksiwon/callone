@@ -160,6 +160,28 @@ def create_app():
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
 
+    @app.post("/api/speakers/{sid}/remember")
+    async def remember(sid: str, payload: dict):
+        """통화 이력 → 기억 성장(유저 주도 영속화). body: {history:[{role,content}]}
+        클라 소유 이력을 유저가 명시적으로 서버 기억(memories.json)에 승격 —
+        다음 통화부터 use_rag(auto)가 회상. LLM(llama-server) 필요."""
+        import asyncio
+
+        from ..llm.memory_update import remember_from_history
+
+        history = payload.get("history") or []
+        if not isinstance(history, list) or not history:
+            return JSONResponse({"error": "history 비었음"}, status_code=400)
+        base_url = (load_config("serve").get("llm") or {}).get("base_url",
+                                                               "http://127.0.0.1:8090")
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(
+                None, lambda: remember_from_history(sid, history, base_url))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"기억 추출 실패(llama-server 확인): {e}"},
+                                status_code=503)
+
     @app.get("/api/speakers/{sid}/profile")
     def get_profile(sid: str):
         pj = _speakers_dir() / sid / "profile.json"
@@ -340,6 +362,16 @@ def create_app():
                             if user_text is not None and not user_text.strip():
                                 user_text = None         # partial 실패 시 orch 가 통짜 전사 폴백
                         gen_task = asyncio.ensure_future(_run_turn(audio, user_text))
+                    elif t == "farewell":
+                        # 안전한 끝맺음(연구 근거: 급작스러운 종료의 심리적 해악) — 클론이
+                        # 짧은 작별 인사를 하고 클라가 재생 후 끊는다. 메타 턴(record=False):
+                        # 지시문이 이력/자막에 사용자 발화로 남지 않음.
+                        await _finish_gen()
+                        buf = []
+                        fare = ("(사용자가 이제 통화를 끝내려고 한다. 지금까지의 대화 분위기에"
+                                " 맞춰 짧고 따뜻한 작별 인사를 한두 문장으로 해라.)")
+                        gen_task = asyncio.ensure_future(
+                            _run_turn(np.zeros(1, np.float32), user_text=fare))
                     elif t in ("interrupt", "stop"):
                         orch.interrupt()
                         if t == "stop":

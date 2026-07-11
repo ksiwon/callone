@@ -498,20 +498,23 @@ class Orchestrator:
         return turn
 
     def stream_turn(self, audio: np.ndarray, sr: int = 16000,
-                    user_text: str | None = None) -> Iterator[tuple]:
+                    user_text: str | None = None, record: bool = True) -> Iterator[tuple]:
         """이벤트 제너레이터 — app(WS)이 실시간 송출 + barge-in 감지에 사용.
         yield 이벤트: ("user", text) / ("text", sentence) / ("latency", ms) /
                       ("audio", np.ndarray) / ("end", reply) / ("interrupted", None)
 
         user_text: 발화 중 스트리밍 전사(asr_streaming)가 이미 확정한 텍스트.
-        주어지면 ASR 단계를 건너뛴다(v2 지연 개선 핵심 — asr_ms ≈ 0)."""
+        주어지면 ASR 단계를 건너뛴다(v2 지연 개선 핵심 — asr_ms ≈ 0).
+        record=False: 메타 턴(작별 인사 등 시스템 지시) — user 이벤트를 안 내보내고
+        대화 이력에도 안 남긴다(지시문이 사용자 발화로 위장되는 것 방지)."""
         self._interrupt.clear()
         t0 = time.time()
         if user_text is None:
             user_text = self.asr.transcribe(audio, sr)
         t_asr = time.time()
         log.info("ASR 완료(%d자, %.0fms)", len(user_text), (t_asr - t0) * 1000)   # 진단(본문 X)
-        yield ("user", user_text)
+        if record:
+            yield ("user", user_text)
         if not user_text.strip():
             log.info("빈 전사 — 턴 종료(말 못 알아들음/무음)")
             yield ("end", "")
@@ -585,7 +588,7 @@ class Orchestrator:
                 continue
             break
 
-        if reply:
+        if reply and record:
             self.history.append({"role": "user", "content": user_text})
             self.history.append({"role": "assistant", "content": reply})
         yield ("timing", {

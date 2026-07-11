@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { useParams, useNavigate } from "react-router-dom";
-import { CallSocket, fileToBase64, previewVoice, listVoicePresets, analyzeVoiceStart, analyzeVoiceStatus, analyzeVoiceSave, type Turn, type SessionInit, type VoicePreset, type AnalyzeStatus } from "../api/calloneClient";
+import { CallSocket, fileToBase64, previewVoice, listVoicePresets, analyzeVoiceStart, analyzeVoiceStatus, analyzeVoiceSave, rememberCall, type Turn, type SessionInit, type VoicePreset, type AnalyzeStatus } from "../api/calloneClient";
 
 const Screen = styled.div`
   min-height: 100vh; display: flex; flex-direction: column; align-items: center;
@@ -196,6 +196,9 @@ export default function CallScreen() {
   const speechRef = useRef(false);                      // 이번 턴에 말 감지됨?
   const lastVoiceRef = useRef(0);                       // 마지막 음성 시각(ms)
   const playNodeRef = useRef<AudioBufferSourceNode | null>(null);  // 재생 중 노드(끼어들기 정지용)
+  const endingRef = useRef(false);                      // 작별 인사 재생 후 자동 종료 플래그
+  const [consent, setConsent] = useState(false);        // 목소리 주인 동의 확인(윤리 게이트)
+  const [memBusy, setMemBusy] = useState(false);        // 기억시키기 진행 중
   const [chat, setChat] = useState<{ who: "me" | "them" | "sys"; text: string }[]>([]);
 
   // 클라가 소유하는 개인데이터(서버 영속 0)
@@ -288,8 +291,10 @@ export default function CallScreen() {
     finally { setAnaBusy(false); }
   }
 
-  // 목소리 준비됨? (다음/시작 버튼 활성 조건) — 업로드했거나 프리셋 골랐거나
-  const hasVoice = voiceSource === "own" ? !!voiceFile : !!presetId;
+  // 목소리 준비됨? (다음/시작 버튼 활성 조건) — 업로드했거나 프리셋 골랐거나.
+  // own/call 플로우는 목소리 주인 동의 체크(윤리 게이트)까지 요구. 프리셋은 등록 시 확인됨.
+  const hasVoice = (voiceSource === "own" ? !!voiceFile : !!presetId)
+    && (voiceSource === "preset" || consent);
 
   useEffect(() => {
     if (!started) return;
@@ -322,6 +327,28 @@ export default function CallScreen() {
     turnAudioRef.current = []; turnFramesRef.current = [];
     speechRef.current = false;
     setCS("listening");
+  }
+
+  // 안전한 끝맺음: 듣는 중이면 클론이 작별 인사 → 재생 끝나면 자동 종료. 그 외 상태면 바로 종료.
+  function farewellAndEnd() {
+    if (callStateRef.current !== "listening" || !sockRef.current) { endCall(); return; }
+    endingRef.current = true;
+    setCS("thinking");
+    sockRef.current.farewell();
+  }
+
+  // 오늘 대화를 서버 기억으로 승격(유저 주도) — 다음 통화부터 회상(use_rag: auto).
+  async function rememberThisCall() {
+    if (!historyRef.current.length || memBusy) return;
+    setMemBusy(true);
+    try {
+      const r = await rememberCall(id, historyRef.current);
+      setChat((c) => [...c, { who: "sys", text: r.added
+        ? `🧠 기억 ${r.added}개 저장 (총 ${r.total}) — 다음 통화부터 기억해요`
+        : "🧠 새로 기억할 만한 내용이 없었어요" }]);
+    } catch (e: any) {
+      setChat((c) => [...c, { who: "sys", text: `⚠️ ${e?.message || "기억 저장 실패"}` }]);
+    } finally { setMemBusy(false); }
   }
 
   async function startCall() {
@@ -462,6 +489,7 @@ export default function CallScreen() {
       if (bitmaps.length) drawBitmap(bitmaps[bitmaps.length - 1]);
       bitmaps.forEach((b) => b.close());
       speechRef.current = false;
+      if (endingRef.current) { endCall(); return; }   // 작별 턴이 빈손이어도 종료는 진행
       setCS("listening");                        // 빈 턴(빈 전사 등) → 다시 듣기
       return;
     }
@@ -481,6 +509,7 @@ export default function CallScreen() {
     node.onended = () => {                       // 재생 끝(또는 stop) → 다시 듣기
       playNodeRef.current = null;
       speechRef.current = false;                 // 재생 잔향/에코를 말로 오인하는 것 방지
+      if (endingRef.current) { endCall(); return; }   // 작별 인사였다면 재생 후 종료
       setCS("listening");
     };
     setCS("speaking");
@@ -603,6 +632,10 @@ export default function CallScreen() {
                 <label>참조 음성 내용 (전사 — 정확할수록 유사도↑, 수정 가능)</label>
                 <input type="text" value={refText} onChange={(e) => setRefText(e.target.value)} placeholder="미리듣기를 누르면 자동으로 채워집니다" />
               </>)}
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+                이 목소리의 주인에게 사용 동의를 받았어요 (본인 목소리 포함)
+              </label>
             </>)}
 
             {voiceSource === "call" && (<>
@@ -644,10 +677,14 @@ export default function CallScreen() {
                   <div style={{ display: "flex", gap: 8 }}>
                     <input type="text" value={anaName} onChange={(e) => setAnaName(e.target.value)}
                       placeholder="프리셋 이름" style={{ flex: 1 }} />
-                    <Btn onClick={saveAnalyzed} disabled={anaBusy || !anaName.trim()}>
+                    <Btn onClick={saveAnalyzed} disabled={anaBusy || !anaName.trim() || !consent}>
                       {anaBusy ? "저장 중…" : "이 목소리 쓰기"}
                     </Btn>
                   </div>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                    <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+                    이 목소리의 주인에게 사용 동의를 받았어요
+                  </label>
                 </>)}
               </>)}
               {anaMsg && <Note err={anaMsg.startsWith("⚠️")}>{anaMsg}</Note>}
@@ -747,8 +784,9 @@ export default function CallScreen() {
         )}
       </VideoSide>
       <InfoSide>
-        <Who><Big>{id}</Big><Status>{CS_LABEL[callState]} · {mm}:{ss}</Status></Who>
+        <Who><Big>{id}</Big><Status>{CS_LABEL[callState]} · {mm}:{ss} · 🤖 AI 클론 음성</Status></Who>
         {status && <SysNote>⚠️ {status}</SysNote>}
+        {sec > 1800 && <SysNote>☕ 30분 넘게 통화 중이에요 — 잠깐 쉬어가도 좋아요.</SysNote>}
         <Chat>
           {chat.map((c, i) => c.who === "sys"
             ? <SysNote key={i}>{c.text}</SysNote>
@@ -772,8 +810,12 @@ export default function CallScreen() {
           </Btn>
           {!autoTurn && <Btn onClick={sendTurn}>응답 전송</Btn>}
           <Btn onClick={() => setShowHud((v) => !v)} title="단계별 지연(ms)">⏱</Btn>
+          <Btn onClick={rememberThisCall} disabled={memBusy}
+            title="오늘 대화의 사실을 기억에 저장 — 다음 통화부터 회상">
+            {memBusy ? "기억 중…" : "🧠 기억시키기"}</Btn>
           <Btn onClick={exportHistory}>대화 내보내기</Btn>
-          <Btn danger onClick={endCall}>종료</Btn>
+          <Btn onClick={farewellAndEnd} title="클론이 작별 인사를 한 뒤 끊어요">👋 작별하고 종료</Btn>
+          <Btn danger onClick={endCall}>바로 종료</Btn>
         </Controls>
       </InfoSide>
     </Split>

@@ -192,10 +192,27 @@ export class CallSocket {
   interrupt() {
     try { this.ws.send(JSON.stringify({ type: "interrupt" })); } catch { /* noop */ }
   }
+  // 안전한 끝맺음: 클론이 작별 인사 → 재생 후 클라가 끊음(급작스러운 종료의 심리적 해악 완화).
+  farewell() {
+    try { this.ws.send(JSON.stringify({ type: "farewell" })); } catch { /* noop */ }
+  }
   stop() {
     try { this.ws.send(JSON.stringify({ type: "stop" })); } catch { /* noop */ }
     this.ws.close();
   }
+}
+
+// 통화 이력 → 기억 성장(유저 주도 영속화 — 누르면 서버 memories.json 에 사실 추가,
+// 다음 통화부터 회상). 클라 소유 이력의 명시적 승격이라 프라이버시 원칙과 합치.
+export async function rememberCall(speakerId: string, history: Turn[]):
+  Promise<{ added: number; total: number }> {
+  const r = await fetch(`${BASE}/api/speakers/${speakerId}/remember`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ history }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "기억 저장 실패");
+  return j;
 }
 
 // 파일 → base64(데이터URL 접두 제거). 음성/사진 전송용.
