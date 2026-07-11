@@ -30,7 +30,7 @@ from ..common.schemas import SpeakerProfile
 log = get_logger("app")
 
 try:
-    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
 except Exception:  # noqa: BLE001
@@ -109,6 +109,56 @@ def create_app():
         클립 자체는 서버 로컬(gitignore) — 목록만 노출(id·label)."""
         from .voice_presets import list_presets
         return list_presets()
+
+    # ----- 긴 통화 녹음 → 화자별 ref 추출 (UI 플로우 B, voice_analyze) ------
+    @app.post("/api/voice/analyze")
+    async def voice_analyze_start(request: Request):
+        """긴 녹음(raw body, 수십 MB~) 업로드 → 화자분리+구간점수 job 시작.
+        ?ext=m4a 확장자 힌트(디코딩용). 원본은 tmpfs, 분석 후 즉시 삭제."""
+        raw = await request.body()
+        if not raw or len(raw) < 10_000:
+            return JSONResponse({"error": "오디오가 비었거나 너무 작음"}, status_code=400)
+        ext = "." + (request.query_params.get("ext") or "m4a").lstrip(".").lower()
+        from .voice_analyze import start_job
+
+        return {"job_id": start_job(raw, suffix=ext)}
+
+    @app.get("/api/voice/analyze/{job_id}")
+    def voice_analyze_status(job_id: str):
+        from .voice_analyze import job_status
+
+        st = job_status(job_id)
+        if st is None:
+            return JSONResponse({"error": "job 없음(만료 1h)"}, status_code=404)
+        return st
+
+    _analyze_asr: dict = {}   # 프리셋 전사용 ASR 1회 로드 캐시
+
+    @app.post("/api/voice/analyze/{job_id}/save")
+    async def voice_analyze_save(job_id: str, payload: dict):
+        """선택 화자의 best 클립 → 프리셋 저장. body: {speaker_id, name}"""
+        import asyncio
+
+        from .voice_analyze import save_pick
+
+        def _work():
+            asr = _analyze_asr.get("asr")
+            if asr is None:
+                try:
+                    from .asr_stream import StreamASR
+
+                    asr = StreamASR(load_config("serve").get("asr", {}))
+                except Exception:  # noqa: BLE001
+                    asr = None
+                _analyze_asr["asr"] = asr
+            return save_pick(job_id, str(payload.get("speaker_id", "")),
+                             str(payload.get("name", "")), asr=asr)
+
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(None, _work)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
 
     @app.get("/api/speakers/{sid}/profile")
     def get_profile(sid: str):

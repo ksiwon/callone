@@ -34,19 +34,15 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from callone.common.audio import estimate_snr_db, load_wav, save_wav  # noqa: E402
+from callone.common.audio import estimate_snr_db, load_wav, ref_clip_score, save_wav  # noqa: E402
 from callone.common.io import data_dir  # noqa: E402
 
 OUT_SR = 24000          # 프리셋 저장 sr(서빙이 어차피 16k 리샘플, 원음 보존 겸 24k)
-IDEAL_SEC = 9.0         # 제로샷 레퍼런스 최적 길이(6~12s 중앙)
 
 
 def _score(snr_db: float, dur: float, min_s: float, max_s: float) -> float:
-    if not (min_s <= dur <= max_s):
-        return -1.0
-    snr_n = min(max(snr_db, 0.0), 25.0) / 25.0          # 25dB 이상은 동급
-    dur_n = 1.0 - min(abs(dur - IDEAL_SEC) / IDEAL_SEC, 1.0)
-    return 0.6 * snr_n + 0.4 * dur_n
+    """공용 기준(common.audio.ref_clip_score) — UI 분석(voice_analyze)과 동일 점수."""
+    return ref_clip_score(snr_db, dur, min_s, max_s)
 
 
 # ── 모드 ①: 파이프라인 산출물(통화본, 화자분리 완료) ──────────────────────────

@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { useParams, useNavigate } from "react-router-dom";
-import { CallSocket, fileToBase64, previewVoice, listVoicePresets, type Turn, type SessionInit, type VoicePreset } from "../api/calloneClient";
+import { CallSocket, fileToBase64, previewVoice, listVoicePresets, analyzeVoiceStart, analyzeVoiceStatus, analyzeVoiceSave, type Turn, type SessionInit, type VoicePreset, type AnalyzeStatus } from "../api/calloneClient";
 
 const Screen = styled.div`
   min-height: 100vh; display: flex; flex-direction: column; align-items: center;
@@ -202,7 +202,14 @@ export default function CallScreen() {
   const [voiceFile, setVoiceFile] = useState<File | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   // 목소리 소스: 내 파일 업로드 vs 서버에 준비된 프리셋 선택
-  const [voiceSource, setVoiceSource] = useState<"own" | "preset">("own");
+  const [voiceSource, setVoiceSource] = useState<"own" | "call" | "preset">("own");
+  // 플로우 B: 긴 통화 녹음 → 서버 화자분리 → "그 사람" 선택 → 프리셋 저장
+  const [anaJob, setAnaJob] = useState("");                 // 분석 job id("" = 없음)
+  const [anaStatus, setAnaStatus] = useState<AnalyzeStatus | null>(null);
+  const [anaSpeaker, setAnaSpeaker] = useState("");         // 고른 화자 id
+  const [anaName, setAnaName] = useState("");               // 저장할 프리셋 이름
+  const [anaMsg, setAnaMsg] = useState("");                 // 진행/에러 안내
+  const [anaBusy, setAnaBusy] = useState(false);
   const [presets, setPresets] = useState<VoicePreset[]>([]);
   const [presetId, setPresetId] = useState("");
   // 캐릭터 카드(character card) 필드 — 실제 캐릭터 챗 사이트(Character.AI/SillyTavern) 표준.
@@ -244,6 +251,42 @@ export default function CallScreen() {
 
   // 서버에 준비된 프리셋 목소리 목록(있으면 '준비된 목소리' 탭에 표시)
   useEffect(() => { listVoicePresets().then(setPresets).catch(() => setPresets([])); }, []);
+
+  // 플로우 B: 분석 job 폴링(2s) — done/error 에서 멈춤
+  useEffect(() => {
+    if (!anaJob) return;
+    const t = setInterval(async () => {
+      try {
+        const st = await analyzeVoiceStatus(anaJob);
+        setAnaStatus(st);
+        if (st.stage === "done" || st.stage === "error") clearInterval(t);
+      } catch (e: any) {
+        setAnaMsg(`⚠️ ${e?.message || "분석 조회 실패"}`); clearInterval(t);
+      }
+    }, 2000);
+    return () => clearInterval(t);
+  }, [anaJob]);
+
+  async function startAnalyze(f: File | null) {
+    if (!f) return;
+    setAnaStatus(null); setAnaSpeaker(""); setAnaMsg("업로드 중… (긴 파일은 수십 초)");
+    try {
+      const jid = await analyzeVoiceStart(f);
+      setAnaJob(jid); setAnaMsg("");
+    } catch (e: any) { setAnaMsg(`⚠️ ${e?.message || "업로드 실패"}`); }
+  }
+
+  async function saveAnalyzed() {
+    if (!anaSpeaker || !anaName.trim()) return;
+    setAnaBusy(true); setAnaMsg("최적 구간 저장 + 전사 중…");
+    try {
+      const r = await analyzeVoiceSave(anaJob, anaSpeaker, anaName.trim());
+      const list = await listVoicePresets(); setPresets(list);
+      setPresetId(r.preset_id); setVoiceSource("preset");     // 저장 즉시 '준비된 목소리'로 합류
+      setAnaMsg(`✅ '${r.preset_id}' 저장됨(${r.dur}s) — 아래에서 미리듣고 다음으로.`);
+    } catch (e: any) { setAnaMsg(`⚠️ ${e?.message || "저장 실패"}`); }
+    finally { setAnaBusy(false); }
+  }
 
   // 목소리 준비됨? (다음/시작 버튼 활성 조건) — 업로드했거나 프리셋 골랐거나
   const hasVoice = voiceSource === "own" ? !!voiceFile : !!presetId;
@@ -536,20 +579,23 @@ export default function CallScreen() {
           <StepHint>{STEP_META[step - 1][1]}</StepHint>
 
           {step === 1 && (<>
+            <label>어떤 자료를 갖고 있나요?</label>
             <div style={{ display: "flex", gap: 8 }}>
-              {(["own", "preset"] as const).map((m) => (
+              {(["own", "call", "preset"] as const).map((m) => (
                 <button key={m} type="button" onClick={() => setVoiceSource(m)}
                   style={{ flex: 1, padding: 9, borderRadius: 8, cursor: "pointer", fontWeight: 600,
                     border: voiceSource === m ? "1px solid #7aa2f7" : "1px solid #2a3a52",
                     background: voiceSource === m ? "#7aa2f7" : "#0c1422",
                     color: voiceSource === m ? "#0e1726" : "#fff" }}>
-                  {m === "own" ? "내 목소리 업로드" : `준비된 목소리${presets.length ? ` (${presets.length})` : ""}`}
+                  {m === "own" ? "짧은 목소리 파일"
+                    : m === "call" ? "긴 통화 녹음"
+                    : `준비된 목소리${presets.length ? ` (${presets.length})` : ""}`}
                 </button>
               ))}
             </div>
 
-            {voiceSource === "own" ? (<>
-              <label>화자 음성 (7~10초, 깨끗한 wav/mp3)</label>
+            {voiceSource === "own" && (<>
+              <label>그 사람 목소리 파일 (5~15초, 깨끗할수록 좋아요 — wav/mp3/m4a)</label>
               <input type="file" accept="audio/*" onChange={(e) => { setVoiceFile(e.target.files?.[0] ?? null); setPreviewMsg(""); }} />
               {voiceFile && <Preview onClick={runPreview} disabled={previewing}>{previewing ? "합성 중…" : "🔊 복제 목소리 미리듣기"}</Preview>}
               {previewMsg && <Note err={previewMsg.startsWith("⚠️")}>{previewMsg}</Note>}
@@ -557,7 +603,57 @@ export default function CallScreen() {
                 <label>참조 음성 내용 (전사 — 정확할수록 유사도↑, 수정 가능)</label>
                 <input type="text" value={refText} onChange={(e) => setRefText(e.target.value)} placeholder="미리듣기를 누르면 자동으로 채워집니다" />
               </>)}
-            </>) : (<>
+            </>)}
+
+            {voiceSource === "call" && (<>
+              <label>통화 녹음 파일 (몇 시간짜리도 OK — m4a/mp3/wav)</label>
+              <Note>서버가 화자를 분리해 "그 사람" 목소리의 가장 깨끗한 구간을 자동으로 찾아드려요.
+                원본은 분석 후 즉시 삭제되고, 저장을 눌러야만 목소리가 등록돼요.</Note>
+              <input type="file" accept="audio/*"
+                onChange={(e) => startAnalyze(e.target.files?.[0] ?? null)} />
+              {anaJob && anaStatus?.stage !== "done" && anaStatus?.stage !== "error" && (
+                <Note>⏳ {anaStatus?.stage === "diarize" ? "화자 분리 중… (긴 녹음은 몇 분 걸려요)"
+                  : anaStatus?.stage === "scoring" ? "좋은 구간 고르는 중…"
+                  : "분석 준비 중…"}</Note>
+              )}
+              {anaStatus?.stage === "error" && <Note err>⚠️ {anaStatus.error}</Note>}
+              {anaStatus?.stage === "done" && (<>
+                {anaStatus.dummy_diarizer &&
+                  <Note err>⚠️ 정밀 화자분리 모델(pyannote)이 서버에 없어 구분이 부정확할 수 있어요 —
+                    serve venv 에 pip install pyannote.audio + HF_TOKEN 설정 권장.</Note>}
+                <label>누가 "그 사람"인가요? 들어보고 고르세요</label>
+                {(anaStatus.speakers ?? []).map((s, i) => (
+                  <div key={s.id} onClick={() => setAnaSpeaker(s.id)}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: 10, marginBottom: 6,
+                      borderRadius: 8, cursor: "pointer",
+                      border: anaSpeaker === s.id ? "1px solid #7aa2f7" : "1px solid #2a3a52",
+                      background: anaSpeaker === s.id ? "#16233b" : "#0c1422" }}>
+                    <input type="radio" checked={anaSpeaker === s.id} onChange={() => setAnaSpeaker(s.id)} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600 }}>화자 {i + 1}</div>
+                      <div style={{ fontSize: 12, opacity: 0.7 }}>
+                        발화 {Math.round(s.total_sec / 60)}분 {Math.round(s.total_sec % 60)}초 · {s.n_segments}구간 · 음질 {s.best_snr}dB
+                      </div>
+                    </div>
+                    <audio controls preload="none" style={{ height: 32, maxWidth: 180 }}
+                      src={`data:audio/wav;base64,${s.sample_wav_b64}`} />
+                  </div>
+                ))}
+                {anaSpeaker && (<>
+                  <label>이 목소리의 이름 (예: 엄마, 나은)</label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input type="text" value={anaName} onChange={(e) => setAnaName(e.target.value)}
+                      placeholder="프리셋 이름" style={{ flex: 1 }} />
+                    <Btn onClick={saveAnalyzed} disabled={anaBusy || !anaName.trim()}>
+                      {anaBusy ? "저장 중…" : "이 목소리 쓰기"}
+                    </Btn>
+                  </div>
+                </>)}
+              </>)}
+              {anaMsg && <Note err={anaMsg.startsWith("⚠️")}>{anaMsg}</Note>}
+            </>)}
+
+            {voiceSource === "preset" && (<>
               <label>준비된 목소리 선택</label>
               {presets.length ? (
                 <select value={presetId} onChange={(e) => setPresetId(e.target.value)}
@@ -566,8 +662,9 @@ export default function CallScreen() {
                   {presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
               ) : (
-                <Note>준비된 목소리가 없어요. 서버 data/voice_presets/ 에 wav 를 올리면(scp) 여기 떠요. (권리 있는 클립만)</Note>
+                <Note>준비된 목소리가 없어요. '긴 통화 녹음' 탭에서 추출하거나, 서버 data/voice_presets/ 에 wav 를 올리면(scp) 여기 떠요. (권리 있는 클립만)</Note>
               )}
+              {anaMsg && <Note err={anaMsg.startsWith("⚠️")}>{anaMsg}</Note>}
             </>)}
           </>)}
 

@@ -123,6 +123,18 @@ mic ─→ VAD(speech start 감지)
 - 대화 이력: 현행 유지(localStorage, 클라 소유, export/import).
 - WS 프로토콜 추가 이벤트: `partial`(스트리밍 전사), `state`(listening/thinking/speaking).
 
+### 4-1. 목소리 입수 — 두 유저 플로우 (①단계 "어떤 자료를 갖고 있나요?")
+
+| 유저 | 플로우 |
+|---|---|
+| **A. 10초 목소리 파일** | 짧은 파일 탭 → 업로드 → 🔊 미리듣기(전사 자동) → 다음 |
+| **B. 몇 시간짜리 2인 통화 녹음** | 긴 통화 녹음 탭 → 업로드(raw body → tmpfs) → 서버 job: 화자분리(pyannote 체인)+겹침 제외+구간 점수화(ref_clip_score) → **화자 카드(들어보기 샘플)** "누가 그 사람?" → 선택+이름 → best 클립을 프리셋 저장(전사 포함) → '준비된 목소리'로 합류 |
+
+- API: `POST /api/voice/analyze`(job 시작) / `GET .../analyze/{job}`(폴링) / `POST .../analyze/{job}/save`.
+- 프라이버시: 원본은 tmpfs, 분석 직후 삭제. 저장 버튼을 눌러야만 프리셋(디스크) 생성. job TTL 1h.
+- CLI 동일 기능: `scripts/pick_ref_clip.py` (같은 점수 함수 `common.audio.ref_clip_score` 공유).
+- 확장(후속): B 플로우에서 그 화자의 전사→기억(memories) 구축 버튼, 말투 통계→캐릭터 카드 자동 채움.
+
 ---
 
 ## 5. 마이그레이션 순서 (각 단계 독립 커밋, 폴백 유지로 무중단)

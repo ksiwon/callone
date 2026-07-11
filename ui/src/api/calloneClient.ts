@@ -106,6 +106,40 @@ export async function listVoicePresets(): Promise<VoicePreset[]> {
   return r.ok ? r.json() : [];
 }
 
+// ----- 긴 통화 녹음 → 화자 분석(플로우 B). 원본은 서버 tmpfs, 분석 끝나면 즉시 삭제 -----
+export interface AnalyzeSpeaker {
+  id: string; total_sec: number; n_segments: number; best_snr: number;
+  sample_wav_b64: string;   // "누가 그 사람?" 청취 샘플(wav)
+}
+export interface AnalyzeStatus {
+  stage: "loading" | "diarize" | "scoring" | "done" | "error";
+  error?: string;
+  dummy_diarizer?: boolean; // true = pyannote 미설치 → 화자 구분 신뢰 불가(설치 안내)
+  speakers?: AnalyzeSpeaker[];
+}
+export async function analyzeVoiceStart(file: File): Promise<string> {
+  const ext = (file.name.split(".").pop() || "m4a").toLowerCase();
+  const r = await fetch(`${BASE}/api/voice/analyze?ext=${ext}`, { method: "POST", body: file });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `업로드 실패(${r.status})`);
+  return j.job_id;
+}
+export async function analyzeVoiceStatus(jobId: string): Promise<AnalyzeStatus> {
+  const r = await fetch(`${BASE}/api/voice/analyze/${jobId}`);
+  if (!r.ok) throw new Error("분석 상태 조회 실패(만료 1h?)");
+  return r.json();
+}
+export async function analyzeVoiceSave(jobId: string, speakerId: string, name: string):
+  Promise<{ preset_id: string; ref_text: string; dur: number }> {
+  const r = await fetch(`${BASE}/api/voice/analyze/${jobId}/save`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ speaker_id: speakerId, name }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "프리셋 저장 실패");
+  return j;
+}
+
 // 실시간 통화 WebSocket. 마이크 오디오(Float32) 업스트림, 음성 청크 다운스트림.
 export class CallSocket {
   private ws: WebSocket;
