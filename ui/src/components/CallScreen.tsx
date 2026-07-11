@@ -185,6 +185,17 @@ export default function CallScreen() {
   const [status, setStatus] = useState("준비");
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
+  // v2 통화 상태머신: 연결중 → 듣는중 → (엔드포인트) 생각중 → 말하는중 → 듣는중.
+  const [callState, setCallState] = useState<"connecting" | "listening" | "thinking" | "speaking">("connecting");
+  const callStateRef = useRef<"connecting" | "listening" | "thinking" | "speaking">("connecting");
+  const [partial, setPartial] = useState("");           // 발화 중 실시간 자막(서버 partial 전사)
+  const [lastTiming, setLastTiming] = useState<Record<string, number> | null>(null);
+  const [showHud, setShowHud] = useState(false);        // 단계별 지연 HUD(개발자)
+  const [autoTurn, setAutoTurn] = useState(true);       // 침묵 감지 자동 응답(끄면 버튼)
+  const autoTurnRef = useRef(true);
+  const speechRef = useRef(false);                      // 이번 턴에 말 감지됨?
+  const lastVoiceRef = useRef(0);                       // 마지막 음성 시각(ms)
+  const playNodeRef = useRef<AudioBufferSourceNode | null>(null);  // 재생 중 노드(끼어들기 정지용)
   const [chat, setChat] = useState<{ who: "me" | "them" | "sys"; text: string }[]>([]);
 
   // 클라가 소유하는 개인데이터(서버 영속 0)
@@ -247,9 +258,33 @@ export default function CallScreen() {
     try { localStorage.setItem(HKEY, JSON.stringify(historyRef.current)); } catch { /* noop */ }
   }
 
+  function setCS(s: "connecting" | "listening" | "thinking" | "speaking") {
+    callStateRef.current = s;
+    setCallState(s);
+  }
+
+  // 턴 확정(수동 버튼/자동 침묵감지 공용) — 서버는 발화 중 이미 전사해 둠(partial) → 즉시 응답 시작.
+  function sendTurn() {
+    if (callStateRef.current !== "listening") return;
+    speechRef.current = false;
+    setCS("thinking");
+    sockRef.current?.endTurn();
+  }
+
+  // v2 barge-in: 재생/생성 중단(버튼). 서버 interrupt + 로컬 재생 즉시 정지.
+  function bargeIn() {
+    sockRef.current?.interrupt();
+    try { playNodeRef.current?.stop(); } catch { /* noop */ }
+    if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    turnAudioRef.current = []; turnFramesRef.current = [];
+    speechRef.current = false;
+    setCS("listening");
+  }
+
   async function startCall() {
     setStarted(true);
-    setStatus("연결 중…");
+    setStatus("");
+    setCS("connecting");
     // 이어하기: 저장된 이력을 채팅 말풍선으로 미리 표시(user=나, assistant=상대).
     setChat(historyRef.current.map((m) => ({ who: (m.role === "user" ? "me" : "them") as "me" | "them", text: m.content })));
     const sock = new CallSocket(id, {
@@ -257,19 +292,22 @@ export default function CallScreen() {
       onAudio: (pcm) => { turnAudioRef.current.push(pcm); },
       onReply: (text, latency) => {
         historyRef.current.push({ role: "assistant", content: text }); persist();
-        setStatus("통화 중");
         void latency;
         setChat((c) => [...c, { who: "them", text }]);
       },
       onUser: (text) => {
+        setPartial("");                                  // 최종 전사 도착 → 자막을 말풍선으로 승격
         if (text.trim()) { historyRef.current.push({ role: "user", content: text }); persist();
           setChat((c) => [...c, { who: "me", text }]); }
       },
+      onPartial: (text) => { if (callStateRef.current === "listening") setPartial(text); },
+      onTiming: (stages) => setLastTiming(stages),
+      onInterrupted: () => bargeIn(),                    // 서버발 중단 확인 → 로컬 재생도 정리
       onFrame: (jpegB64) => { turnFramesRef.current.push(jpegB64); },
       onAudioEnd: () => playTurn(),
       // 준비 완료(서버가 음성·사진·graph 다 세팅)되면 그때 마이크 켠다 — 연결 중엔 오디오 안 보냄
       // (안 그러면 서버가 init 처리 중에 오디오 폭주로 WS 수신큐 오버플로→끊김).
-      onReady: () => { setStatus("통화 중"); startMic(sock); },
+      onReady: () => { setCS("listening"); startMic(sock); },
     });
     sockRef.current = sock;
 
@@ -336,7 +374,22 @@ export default function CallScreen() {
       const proc = ctx.createScriptProcessor(4096, 1, 1);
       proc.onaudioprocess = (e) => {
         if (mutedRef.current) return;
-        sock.sendAudio(new Float32Array(e.inputBuffer.getChannelData(0)));
+        // 말하는 중(재생)엔 마이크를 안 보낸다 — 스피커 에코가 다음 턴 버퍼/전사를 오염시키는 것 방지.
+        // 음성 barge-in 대신 🤚 버튼(bargeIn) 사용(C.AI Calls 와 같은 UX — REBUILD_PLAN §0).
+        if (callStateRef.current === "speaking") return;
+        const pcm = new Float32Array(e.inputBuffer.getChannelData(0));
+        sock.sendAudio(pcm);
+        if (!autoTurnRef.current) return;
+        // 클라 엔드포인팅: 말 감지 후 900ms 무음 → 자동 응답(서버는 발화 중 이미 전사 완료 상태).
+        let sum = 0;
+        for (let i = 0; i < pcm.length; i++) sum += pcm[i] * pcm[i];
+        const rms = Math.sqrt(sum / pcm.length);
+        const now = performance.now();
+        if (rms > 0.015) { speechRef.current = true; lastVoiceRef.current = now; }
+        else if (speechRef.current && callStateRef.current === "listening"
+                 && now - lastVoiceRef.current > 900) {
+          sendTurn();
+        }
       };
       src.connect(proc); proc.connect(ctx.destination);
       cleanupMicRef.current = () => {
@@ -365,6 +418,8 @@ export default function CallScreen() {
     if (!chunks.length) {                        // 오디오 없으면 마지막 프레임만 표시
       if (bitmaps.length) drawBitmap(bitmaps[bitmaps.length - 1]);
       bitmaps.forEach((b) => b.close());
+      speechRef.current = false;
+      setCS("listening");                        // 빈 턴(빈 전사 등) → 다시 듣기
       return;
     }
     let ctx = playCtxRef.current;
@@ -379,6 +434,13 @@ export default function CallScreen() {
     const node = ctx.createBufferSource();
     node.buffer = buf; node.connect(ctx.destination);
     const startAt = ctx.currentTime + 0.08;
+    playNodeRef.current = node;                  // 끼어들기 버튼이 정지할 수 있게 보관
+    node.onended = () => {                       // 재생 끝(또는 stop) → 다시 듣기
+      playNodeRef.current = null;
+      speechRef.current = false;                 // 재생 잔향/에코를 말로 오인하는 것 방지
+      setCS("listening");
+    };
+    setCS("speaking");
     node.start(startAt);
     console.log(`[A/V] frames=${frames.length} dur=${dur.toFixed(2)}s → ${(frames.length / Math.max(dur, 0.01)).toFixed(1)}fps`);
     if (bitmaps.length) {
@@ -416,6 +478,7 @@ export default function CallScreen() {
     const g = cv.getContext("2d"); if (g) g.drawImage(bmp, 0, 0);
   }
   function toggleMute() { mutedRef.current = !mutedRef.current; setMuted(mutedRef.current); }
+  function toggleAutoTurn() { autoTurnRef.current = !autoTurnRef.current; setAutoTurn(autoTurnRef.current); }
 
   function endCall() {
     cleanupMicRef.current();
@@ -571,27 +634,47 @@ export default function CallScreen() {
   }
 
   // ---- 통화 화면: 좌=영상 / 우=정보·채팅·버튼 ----
+  const CS_LABEL: Record<typeof callState, string> = {
+    connecting: "연결 중…", listening: "🎧 듣는 중",
+    thinking: "💭 생각 중", speaking: "🗣 말하는 중",
+  };
   return (
     <Split>
       <VideoSide>
         {hasVideo ? (
           <Avatar ref={canvasRef} />
         ) : (
-          <Wave active={status === "통화 중"}>
+          <Wave active={callState === "speaking"}>
             {Array.from({ length: 9 }).map((_, i) => <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />)}
           </Wave>
         )}
       </VideoSide>
       <InfoSide>
-        <Who><Big>{id}</Big><Status>{status} · {mm}:{ss}</Status></Who>
+        <Who><Big>{id}</Big><Status>{CS_LABEL[callState]} · {mm}:{ss}</Status></Who>
+        {status && <SysNote>⚠️ {status}</SysNote>}
         <Chat>
           {chat.map((c, i) => c.who === "sys"
             ? <SysNote key={i}>{c.text}</SysNote>
             : <Bubble key={i} me={c.who === "me"}>{c.text}</Bubble>)}
+          {partial && <Bubble me style={{ opacity: 0.55 }}>{partial} …</Bubble>}
         </Chat>
+        {showHud && lastTiming && (
+          <SysNote>
+            ⏱ asr {Math.round(lastTiming.asr_ms || 0)} ·
+            llm {Math.round(lastTiming.llm_first_ms || 0)}/{Math.round(lastTiming.llm_total_ms || 0)} ·
+            tts {Math.round(lastTiming.tts_first_ms || 0)} ·
+            첫음성 {Math.round(lastTiming.first_audio_ms || 0)}ms
+          </SysNote>
+        )}
         <Controls>
+          {(callState === "speaking" || callState === "thinking") &&
+            <Btn onClick={bargeIn}>🤚 끼어들기</Btn>}
           <Btn onClick={toggleMute}>{muted ? "음소거 해제" : "음소거"}</Btn>
-          <Btn onClick={() => sockRef.current?.endTurn()}>응답 전송</Btn>
+          <Btn onClick={toggleAutoTurn} title="말 끝나면(0.9s 무음) 자동으로 응답">
+            {autoTurn ? "자동 응답 ✓" : "자동 응답 끔"}
+          </Btn>
+          {!autoTurn && <Btn onClick={sendTurn}>응답 전송</Btn>}
+          <Btn onClick={() => setShowHud((v) => !v)} title="단계별 지연(ms)">⏱</Btn>
           <Btn onClick={exportHistory}>대화 내보내기</Btn>
           <Btn danger onClick={endCall}>종료</Btn>
         </Controls>

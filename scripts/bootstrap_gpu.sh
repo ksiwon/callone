@@ -21,22 +21,37 @@ else export CALLONE_HOME="${CALLONE_HOME:-$HOME}"; fi
 export HF_HOME="${HF_HOME:-$CALLONE_HOME/hf_cache}"
 export CALLONE_TIER="${CALLONE_TIER:-server_gpu}"
 SPK="${SPK:-sis}"
-# LLM 확정(2026-06-23):
-#   >=40GB(A100/H100) = EXAONE-4.0-32B-abliterated Q6_K
-#   <40GB(4090/3090)  = EXAONE-3.5-7.8B-abliterated Q6_K (32B Q6_K 약 26.4GB라 동시구동 불가)
-# LLM_REPO/LLM_GLOB/LLM_DIR env 를 주면 자동선택보다 우선한다.
+# LLM 선택(v2, 2026-07 — docs/REBUILD_PLAN.md §1):
+#   기본 = EXAONE(검증된 한국어 대화체): >=40GB → 4.0-32B Q6_K / <40GB → 3.5-7.8B Q6_K
+#   LLM_PRESET=qwen3-14b → Qwen3-14B Q4_K_M (24GB, 한국어 지식벤치 A/B 상대)
+#   LLM_PRESET=qwen3-32b → Qwen3-32B Q4_K_M (>=40GB)
+#   ※ HyperCLOVA X SEED Think 는 llama.cpp 미지원(GGUF 없음, vLLM --trust_remote_code 전용).
+# LLM_REPO/LLM_GLOB/LLM_DIR env 를 주면 프리셋/자동선택보다 우선한다.
 VRAM_GB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | awk '{print int($1/1024)}')"
-if [ "${VRAM_GB:-0}" -ge 40 ]; then
-  DEFAULT_LLM_REPO="mradermacher/Huihui-EXAONE-4.0-32B-abliterated-GGUF"
-  DEFAULT_LLM_GLOB="*Q6_K*.gguf"
-  DEFAULT_LLM_DIR="$CALLONE_HOME/models/llm_exaone4_32b"
-  DEFAULT_LLM_LABEL="EXAONE-4.0-32B-abliterated Q6_K"
-else
-  DEFAULT_LLM_REPO="AetherArchitectural/EXAONE-3.5-7.8B-Instruct-abliterated-GGUF-ARM-Imatrix-Community"
-  DEFAULT_LLM_GLOB="*Q6_K*.gguf"
-  DEFAULT_LLM_DIR="$CALLONE_HOME/models/llm_exaone"
-  DEFAULT_LLM_LABEL="EXAONE-3.5-7.8B-abliterated Q6_K"
-fi
+case "${LLM_PRESET:-}" in
+  qwen3-14b)
+    DEFAULT_LLM_REPO="Qwen/Qwen3-14B-GGUF"
+    DEFAULT_LLM_GLOB="*Q4_K_M*.gguf"
+    DEFAULT_LLM_DIR="$CALLONE_HOME/models/llm_qwen3_14b"
+    DEFAULT_LLM_LABEL="Qwen3-14B Q4_K_M" ;;
+  qwen3-32b)
+    DEFAULT_LLM_REPO="Qwen/Qwen3-32B-GGUF"
+    DEFAULT_LLM_GLOB="*Q4_K_M*.gguf"
+    DEFAULT_LLM_DIR="$CALLONE_HOME/models/llm_qwen3_32b"
+    DEFAULT_LLM_LABEL="Qwen3-32B Q4_K_M" ;;
+  *)
+    if [ "${VRAM_GB:-0}" -ge 40 ]; then
+      DEFAULT_LLM_REPO="mradermacher/Huihui-EXAONE-4.0-32B-abliterated-GGUF"
+      DEFAULT_LLM_GLOB="*Q6_K*.gguf"
+      DEFAULT_LLM_DIR="$CALLONE_HOME/models/llm_exaone4_32b"
+      DEFAULT_LLM_LABEL="EXAONE-4.0-32B-abliterated Q6_K"
+    else
+      DEFAULT_LLM_REPO="AetherArchitectural/EXAONE-3.5-7.8B-Instruct-abliterated-GGUF-ARM-Imatrix-Community"
+      DEFAULT_LLM_GLOB="*Q6_K*.gguf"
+      DEFAULT_LLM_DIR="$CALLONE_HOME/models/llm_exaone"
+      DEFAULT_LLM_LABEL="EXAONE-3.5-7.8B-abliterated Q6_K"
+    fi ;;
+esac
 LLM_REPO="${LLM_REPO:-$DEFAULT_LLM_REPO}"
 LLM_GLOB="${LLM_GLOB:-$DEFAULT_LLM_GLOB}"
 LLM_DIR="${LLM_DIR:-$DEFAULT_LLM_DIR}"

@@ -196,13 +196,33 @@ def create_app():
         orch = _orchestrators[speaker_id]
         buf: list = []
         gen_task = None     # 현재 응답 생성·송출 태스크(한 번에 하나)
+        stt = None          # 발화 중 스트리밍 전사 세션(v2) — 턴마다 새로 만들고 finalize
 
-        async def _run_turn(audio):
+        # v2: 발화 중 partial 전사(자막 + 턴 종료 시 ASR 지연 0). asr.partial: false 로 끌 수 있음.
+        _serve_cfg = load_config("serve")
+        _partial_on = bool((_serve_cfg.get("asr") or {}).get("partial", True))
+        _partial_ms = int((_serve_cfg.get("asr") or {}).get("partial_interval_ms", 600))
+
+        def _send_partial(text: str):
+            """전사 워커 스레드 → WS(partial 자막). 실패 무해(끊긴 뒤 늦게 온 콜백 등)."""
+            import asyncio as _aio
+
+            _aio.run_coroutine_threadsafe(
+                ws.send_text(json.dumps({"type": "partial", "text": text},
+                                        ensure_ascii=False)), loop)
+
+        def _new_stt():
+            from .asr_streaming import StreamingTranscriber
+
+            return StreamingTranscriber(orch.asr, sr=16000, interval_ms=_partial_ms,
+                                        on_partial=_send_partial)
+
+        async def _run_turn(audio, user_text=None):
             """응답 생성(스레드) → 큐 → WS 송출. 이 코루틴은 **수신 안 함**(단일 수신자 규칙)."""
             q: asyncio.Queue = asyncio.Queue()
 
             def _producer():
-                for ev in orch.stream_turn(audio, sr=16000):
+                for ev in orch.stream_turn(audio, sr=16000, user_text=user_text):
                     loop.call_soon_threadsafe(q.put_nowait, ev)
                 loop.call_soon_threadsafe(q.put_nowait, ("_done", None))
 
@@ -224,6 +244,8 @@ def create_app():
                         await ws.send_text(json.dumps({"type": "user", "text": val}, ensure_ascii=False))
                     elif kind == "latency":
                         await ws.send_text(json.dumps({"type": "latency_ms", "value": val}))
+                    elif kind == "timing":   # 단계별 ms(v2 HUD) — 본문 아닌 숫자만(프라이버시 무관)
+                        await ws.send_text(json.dumps({"type": "timing", "stages": val}))
                     elif kind == "interrupted":
                         await ws.send_text(json.dumps({"type": "interrupted"}))
             finally:
@@ -260,7 +282,14 @@ def create_app():
                         await _finish_gen()              # 이전 응답 정리 후 새 턴(직렬화)
                         audio = np.concatenate(buf) if buf else np.zeros(1, np.float32)
                         buf = []
-                        gen_task = asyncio.ensure_future(_run_turn(audio))
+                        # v2: 발화 중 이미 전사됨 → finalize(꼬리만 1회) 결과를 턴에 주입(ASR 지연 0).
+                        user_text = None
+                        if stt is not None:
+                            _s = stt; stt = None
+                            user_text = await loop.run_in_executor(None, _s.finalize)
+                            if user_text is not None and not user_text.strip():
+                                user_text = None         # partial 실패 시 orch 가 통짜 전사 폴백
+                        gen_task = asyncio.ensure_future(_run_turn(audio, user_text))
                     elif t in ("interrupt", "stop"):
                         orch.interrupt()
                         if t == "stop":
@@ -273,12 +302,22 @@ def create_app():
                         # 불필요 → 생성 중 바이트는 버퍼링도 인터럽트도 안 하고 버린다.
                         # 진짜 끊기는 명시적 'interrupt'/'stop' 제어 메시지로만.
                         continue
-                    buf.append(np.frombuffer(msg["bytes"], dtype=np.float32))
+                    chunk = np.frombuffer(msg["bytes"], dtype=np.float32)
+                    buf.append(chunk)
+                    if _partial_on:                      # 발화 중 스트리밍 전사(v2)
+                        if stt is None:
+                            stt = _new_stt()
+                        stt.feed(chunk)
         except WebSocketDisconnect:
             log.info("통화 종료 speaker=%s", speaker_id)
         finally:
             if gen_task and not gen_task.done():
                 gen_task.cancel()
+            if stt is not None:                          # 발화 버퍼도 즉시 폐기(ephemeral)
+                try:
+                    stt.close()
+                except Exception:  # noqa: BLE001
+                    pass
             # 프라이버시: 연결 끊기면 인메모리 개인데이터(ref tmpfs·이력·아바타) 즉시 폐기.
             try:
                 await loop.run_in_executor(None, orch.cleanup_session)

@@ -136,6 +136,8 @@ sequenceDiagram
 ```
 
 핵심 동작:
+- **발화 중 스트리밍 전사(v2)**: 말하는 **동안** 백그라운드 재전사(`asr_streaming.py`) → UI 실시간 자막(`partial`) + 턴 확정 시 전사가 이미 끝나 있어 **ASR 지연 ≈ 0**. 백엔드는 티어 자동(Qwen3-ASR ↔ faster-whisper 폴백).
+- **TTS 체인(v2)**: `qwen3tts`(:8093, 12Hz 스트리밍) → `cosyvoice3`(:8092, 기본) → piper/kokoro. Qwen3-TTS 승격은 `scripts/bench_v2.py` 음색 안정성 게이트 통과 후(과거 음색 튐 기각 이력 — docs/REBUILD_PLAN.md).
 - **문장 스트리밍**: LLM 응답을 모으되, 합성은 `synth_mode`로 제어 — `full`(통째 1회, 운율·음색 일관, 기본) / `sentence`(문장별, 첫음성 최저지연).
 - **입으로 못 읽는 것 제거**: `_strip_unspoken`이 이모지·괄호 해설(`(웃으며)`)·한자·대괄호 태그를 발화 직전 정제(TTS 오발음 차단).
 - **barge-in**: 클론이 말하는 중 사용자가 말하면 `interrupt()` → 진행 중 LLM/TTS/아바타 스트림을 즉시 중단하고 `("interrupted", None)`.

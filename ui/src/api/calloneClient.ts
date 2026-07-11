@@ -114,7 +114,10 @@ export class CallSocket {
     private cb: {
       onReply: (text: string, latencyMs: number) => void;
       onAudio: (pcm: Float32Array) => void;
-      onUser?: (text: string) => void;       // 내 발화 전사(이력 기록용)
+      onUser?: (text: string) => void;       // 내 발화 전사(이력 기록용, 최종)
+      onPartial?: (text: string) => void;    // v2: 발화 중 실시간 부분 전사(자막)
+      onTiming?: (stages: Record<string, number>) => void;  // v2: 단계별 ms(HUD)
+      onInterrupted?: () => void;            // v2: 서버가 응답 중단 확인
       onFrame?: (jpegB64: string) => void;   // 토킹헤드 프레임
       onReady?: () => void;                  // session_init 완료
       onAudioEnd?: () => void;               // 한 턴 송출 완료 → A/V 동기 재생 트리거
@@ -128,6 +131,9 @@ export class CallSocket {
         const msg = JSON.parse(e.data);
         if (msg.type === "reply") this.cb.onReply(msg.text, msg.latency_ms);
         else if (msg.type === "user") this.cb.onUser?.(msg.text);
+        else if (msg.type === "partial") this.cb.onPartial?.(msg.text);
+        else if (msg.type === "timing") this.cb.onTiming?.(msg.stages);
+        else if (msg.type === "interrupted") this.cb.onInterrupted?.();
         else if (msg.type === "frame") this.cb.onFrame?.(msg.jpeg_b64);
         else if (msg.type === "audio_end") this.cb.onAudioEnd?.();
         else if (msg.type === "session_ready") this.cb.onReady?.();
@@ -147,6 +153,10 @@ export class CallSocket {
   }
   endTurn() {
     this.ws.send(JSON.stringify({ type: "end_turn" }));
+  }
+  // v2 barge-in: 재생/생성 중 응답을 즉시 중단(탭-투-인터럽트 버튼).
+  interrupt() {
+    try { this.ws.send(JSON.stringify({ type: "interrupt" })); } catch { /* noop */ }
   }
   stop() {
     try { this.ws.send(JSON.stringify({ type: "stop" })); } catch { /* noop */ }

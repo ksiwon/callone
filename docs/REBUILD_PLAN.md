@@ -39,9 +39,11 @@
 - 폴백: faster-whisper large-v3-turbo(현행).
 
 ### LLM — 티어별
-- 24GB: **HyperCLOVA X SEED Think 14B** Q4_K_M(GGUF, llama-server) — 한국어 문서상 최강 오픈(자체보고).
-  A/B 상대: Qwen3-14B. 판정은 페르소나 통화 시나리오 블라인드.
-- 80GB: **SEED Think 32B**(vLLM AWQ/FP8) 또는 EXAONE-4.0-32B(현 지원 유지).
+- ⚠️ **SEED Think 는 llama.cpp 미지원**(GGUF 없음, llama.cpp feature request 계류) — vLLM
+  `--trust_remote_code` 경로만 가능. 현 스택은 llama-server 라 **기본값은 EXAONE GGUF 유지**.
+- 24GB: 기본 EXAONE-3.5-7.8B Q6_K(현행, 검증됨). 옵션 `LLM_PRESET=qwen3-14b`(Qwen3-14B GGUF,
+  llama.cpp 지원 확인). SEED Think 14B 는 vLLM 도입 시 A/B(bench_llm_korean.py).
+- 80GB: 기본 EXAONE-4.0-32B Q6_K(현행). 옵션 Qwen3-32B GGUF / SEED Think 32B(vLLM).
 - 비상업이므로 라이선스 제약 없음. DRY 샘플러·RAG·prefix 캐시 등 기존 자산 유지.
 
 ### 아바타 — 현행 유지(Ditto), 이번 라운드 범위 밖.
