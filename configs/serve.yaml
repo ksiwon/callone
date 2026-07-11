@@ -37,8 +37,9 @@ llm:
   base_url: "http://127.0.0.1:8090"   # llama-server 주소(Elice 가 8080 점유 → 8090 기본. bootstrap 이 PORT 로 동기)
   config: llm_laptop           # llm_server(학습용) | llm_laptop(노트북 EXAONE-3.5-2.4B)
   enable_thinking: false       # §1-3: 대화용 thinking 비활성(응답 지연 억제)
-  # 기억 회상: extract_memories.py 로 memories.json 만든 뒤 true 권장(의미검색=삼천포 없음).
-  use_rag: false               # 사실 추출 후 true 로
+  # 기억 회상: auto = 화자에 memories.json/utterances.json 있으면 자동 ON(없으면 OFF).
+  #   파이프라인: 통화녹음 → callone-pilot(전사) → scripts/extract_memories.py → 자동 회상.
+  use_rag: auto                # auto | true | false
   embedder: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # fastembed 지원본(한국어 OK)
   rag_min_score: 0.45          # 게이트(MiniLM 기준): 미만이면 기억 안 씀. 허위회상 잦으면 ↑, 회상 약하면 ↓
   temperature: 0.4             # 실측(EXAONE-3.5-7.8B): 0.7=비문 잦음, 0.4=문법 안정. 반복은 temp 가 아니라

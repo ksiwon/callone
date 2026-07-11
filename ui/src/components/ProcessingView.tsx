@@ -73,7 +73,7 @@ export default function ProcessingView() {
         <Code>{`# 1) 데이터 처리 + 화자 학습(풀튜닝)
 bash scripts/setup_train.sh        # 최초 1회: 학습 환경
 bash scripts/run_full.sh           # 전 단계 데이터셋 생성
-# 목소리 학습은 docs/5_화자A_목소리_학습.md
+# 목소리는 학습 불필요 — 통화 시작 시 음성 업로드(제로샷 클론)
 
 # 2) 서비스 기동 후 통화 화면에서 학습된 화자 선택
 bash scripts/run_all.sh            # llama/cosyvoice/avatar/serve`}</Code>

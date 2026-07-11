@@ -10,9 +10,8 @@ models_ov/
 models_gguf/
 # 병합용 fp16 base 다운로드(재다운 가능)
 models_base/
-# Piper 학습 데이터셋(prep_piper 로 재생성)
+# (구) Piper 학습 산출물 — 학습 경로 폐기, 과거 산출물 무시 유지
 piper_ds/
-# Piper 학습 onnx 스냅샷
 onnx_snaps/
 *.gguf
 *.onnx

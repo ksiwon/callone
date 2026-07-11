@@ -83,6 +83,6 @@ case "$RUN_MODE" in
     echo "환경만 설치함. 실행하려면:"
     echo "  bash scripts/run_pilot.sh 50 A     # 먼저 50통 확인"
     echo "  bash scripts/run_full.sh           # 1000+ 전량"
-    echo "  그 뒤 학습: callone-asr-train / setup_piper_gpu.sh / callone-llm-train"
+    echo "  그 뒤 학습: callone-asr-train / callone-llm-train (목소리는 제로샷 — 학습 없음)"
     ;;
 esac

@@ -82,6 +82,7 @@ else echo "[1/5] .venv-serve 있음 → 스킵"; fi
 source .venv-serve/bin/activate
 command -v huggingface-cli >/dev/null || pip install -q "huggingface_hub[cli]" || true
 pip install -q hf_transfer 2>/dev/null || true
+export HF_HUB_ENABLE_HF_TRANSFER=1   # 대형 GGUF 다운로드 가속(Rust 멀티스트림, 실패 시 자동 폴백)
 
 # llama-server 가 **torch 번들 CUDA 런타임**(드라이버 호환 버전, 보통 12.4)을 쓰게 LD_LIBRARY_PATH 설정.
 # 구드라이버(Elice 실측: 드라이버 12.2) 박스서도 12.4 빌드 바이너리가 돌게 하는 핵심(torch 와 동일 런타임).
@@ -152,9 +153,13 @@ _start_verify() {   # 0=정상 / 2=CUDA에러 / 1=기타실패
   pkill -f llama-server 2>/dev/null; sleep 2
   # EXAONE GGUF의 내장 chat template을 사용한다.
   TMPL_ARG="--jinja"
+  # 말투 LoRA(선택): callone-llm-train 산출 GGUF LoRA 를 LLM_LORA=경로 로 주면 붙인다.
+  #   (make_gguf.py 로 병합했다면 LLM_REPO/LLM_DIR 로 병합본을 지정하는 쪽이 더 빠름.)
+  [ -n "${LLM_LORA:-}" ] && echo "    LoRA 적용: $LLM_LORA"
   echo "    LLM 템플릿: $TMPL_ARG  (GGUF=$(basename "$GGUF"))"
   nohup "$LBIN" -m "$GGUF" --host 127.0.0.1 --port "$PORT" \
-    -c 8192 -n 512 --n-gpu-layers 99 $TMPL_ARG > "$CALLONE_HOME/llama.log" 2>&1 &
+    -c 8192 -n 512 --n-gpu-layers 99 $TMPL_ARG \
+    ${LLM_LORA:+--lora "$LLM_LORA"} > "$CALLONE_HOME/llama.log" 2>&1 &
   for _ in $(seq 1 90); do
     _health && return 0
     grep -qiE 'CUDA error|kernel image is invalid|out of memory' "$CALLONE_HOME/llama.log" && return 2

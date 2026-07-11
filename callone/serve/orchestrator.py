@@ -73,9 +73,15 @@ def _pick_llm(speaker: str, serve_cfg: dict):
     llm_cfg = (serve_cfg or {}).get("llm", {})
     backend = llm_cfg.get("backend", "auto")
     base_url = llm_cfg.get("base_url", "http://127.0.0.1:8080")
-    # LoRA 가 화자 A 말투·습관을 이미 내재화 → 일상 대화엔 RAG OFF 가 더 자연스럽다
-    # (RAG 키워드 발화 주입이 삼천포 유발). 온도 0.5 로 산만함 억제. 둘 다 serve.yaml 로 조정.
-    use_rag = bool(llm_cfg.get("use_rag", False))
+    # RAG: auto = 화자 기억 데이터(memories.json/utterances.json) 있으면 켬, 없으면 끔.
+    # (키워드 발화 주입의 삼천포는 rag.py 게이트(rag_min_score)가 억제. serve.yaml 로 조정.)
+    use_rag = llm_cfg.get("use_rag", False)
+    if isinstance(use_rag, str) and use_rag.lower() == "auto":
+        from ..common.io import data_dir
+
+        _sd = data_dir() / "speakers" / speaker
+        use_rag = (_sd / "memories.json").exists() or (_sd / "utterances.json").exists()
+    use_rag = bool(use_rag)
     temperature = float(llm_cfg.get("temperature", 0.5))
     max_new = int(llm_cfg.get("max_new_tokens", 80))
 

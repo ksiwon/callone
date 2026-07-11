@@ -55,7 +55,6 @@ test = ["pytest>=8.0"]
 # 각 스테이지 독립 CLI (§2.6, §5). entry point 로 노출.
 [project.scripts]
 callone-ingest      = "callone.ingest.s0_convert:main"
-callone-restore     = "callone.restore.s1_restore:main"
 callone-diarize     = "callone.diarize.s2_diarize:main"
 callone-link        = "callone.diarize.s2b_link:main"
 callone-profile     = "callone.profile.s25_profile:main"
@@ -65,7 +64,6 @@ callone-correct     = "callone.asr_adapt.make_correction_set:main"
 callone-asr-train   = "callone.asr_adapt.whisper_finetune:main"
 callone-build-tts   = "callone.dataset.build_tts:main"
 callone-build-dlg   = "callone.dataset.build_dialogue:main"
-callone-tts-laptop  = "callone.tts.train_laptop:main"
 callone-llm-sft     = "callone.llm.prepare_sft:main"
 callone-llm-train   = "callone.llm.train_lora:main"
 callone-serve       = "callone.serve.app:main"
