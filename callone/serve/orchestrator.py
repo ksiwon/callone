@@ -341,10 +341,10 @@ class Orchestrator:
         self.history = []
 
     # ----- 프라이버시 세션(인메모리, 디스크·로그 영속 0) ------------------
-    def _apply_session_reference(self, nsfw: bool, ref_audio, ref_sr: int, ref_text,
+    def _apply_session_reference(self, ref_audio, ref_sr: int, ref_text,
                                  preset_id: str | None = None) -> bool:
-        """세션 TTS 레퍼런스 선택(우선순위): ① 고른 프리셋 목소리(preset_id) → ② NSFW 단일 프리셋
-        (레거시 nsfw_ref_path) → ③ 프론트 음성. ref 잡히면 True(호출측이 CUDA graph 예열).
+        """세션 TTS 레퍼런스 선택(우선순위): ① 고른 프리셋 목소리(preset_id) → ② 프론트 음성.
+        ref 잡히면 True(호출측이 CUDA graph 예열).
         set_reference_* 없는 백엔드(Piper/Kokoro)는 getattr 로 안전 무시."""
         # ① UI 에서 고른 준비된 목소리(data/voice_presets/<id>.wav)
         if preset_id:
@@ -359,15 +359,6 @@ class Orchestrator:
                     log.warning("프리셋 '%s' 없음/로드 실패 — 다음 소스로", preset_id)
                 except Exception as e:  # noqa: BLE001
                     log.warning("프리셋 로드 오류(%s) — 다음 소스로", e)
-        if nsfw:
-            fn = getattr(self.tts, "use_nsfw_reference", None)
-            if callable(fn):
-                try:
-                    if fn():
-                        log.info("NSFW 모드 — 고정 섹시 레퍼런스 사용")
-                        return True
-                except Exception as e:  # noqa: BLE001
-                    log.warning("NSFW 레퍼런스 실패(%s) — 프론트 음성 폴백", e)
         if ref_audio is not None:
             fn = getattr(self.tts, "set_reference", None)
             if callable(fn):
@@ -381,14 +372,12 @@ class Orchestrator:
     def init_session(self, *, ref_audio=None, ref_sr: int = 24000, ref_text=None,
                      portrait=None, persona=None, situation=None, history=None,
                      personality=None, background=None, first_message=None,
-                     example_dialogue=None, user_persona=None, nsfw: bool = False,
-                     preset_id=None):
+                     example_dialogue=None, user_persona=None, preset_id=None):
         """통화 시작 — 프론트가 보낸 개인데이터로 세션 구성(전부 **인메모리**).
 
         ref_audio: 화자 음성 ndarray(목소리 복제) / portrait: 사진 bytes(얼굴) /
         캐릭터 카드(personality/background/first_message/example_dialogue/user_persona) = 상황극 페르소나.
         preset_id: UI 에서 고른 준비된 목소리(data/voice_presets/<id>.wav) — 있으면 프론트 음성 대신 사용.
-        nsfw: 섹시/ASMR 모드 — tts.nsfw_ref_path 설정 시 그 프리셋 레퍼런스로 교체(프론트 음성 무시).
         history: 이전 대화(클라가 보관·복원). 디스크 파일 안 만들고 로그에 본문 안 남긴다.
         통화 끝나면 cleanup_session() 으로 즉시 폐기."""
         self.reset_history()
@@ -399,9 +388,9 @@ class Orchestrator:
                  "user_persona": user_persona}
         if (persona and persona.strip()) or (situation and situation.strip()) or any(v and str(v).strip() for v in _card.values()):
             self.set_context(persona=persona or None, situation=situation or None, **_card)
-        # 목소리(인메모리 ref) — 고른 프리셋 / NSFW 프리셋 / 프론트 음성. TTS 백엔드가 지원하면.
-        if ref_audio is not None or nsfw or preset_id:
-            ref_set = self._apply_session_reference(nsfw, ref_audio, ref_sr, ref_text, preset_id)
+        # 목소리(인메모리 ref) — 고른 프리셋 / 프론트 음성. TTS 백엔드가 지원하면.
+        if ref_audio is not None or preset_id:
+            ref_set = self._apply_session_reference(ref_audio, ref_sr, ref_text, preset_id)
             # 세션 ref 로 TTS CUDA graph 미리 캡처(~10s) → **첫 턴 콜드 제거**.
             # init_session 은 executor(별 스레드)서 도니 이벤트 루프 안 막음. "연결 중" 동안 처리.
             if ref_set and getattr(self.tts, "ref_wav", None):

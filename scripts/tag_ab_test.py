@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """tag_ab_test — CosyVoice3 체크포인트가 인라인 태그를 **실제로 파싱**하는지 A/B 판정.
 
-왜?  orchestrator 는 지금 [breath]/[moan] 같은 대괄호를 TTS 도달 전에 다 지운다(발화 누출 방지).
+왜?  orchestrator 는 지금 [breath]/[laughter] 같은 대괄호를 TTS 도달 전에 다 지운다(발화 누출 방지).
      태그를 화이트리스트로 살리려면, 이 서버 모델(Fun-CosyVoice3-0.5B)이 그 토큰을 **소리로**
      해석하는지 먼저 확인해야 한다. 논문/데모가 지원해도 이 0.5B 체크포인트가 될지는 별개.
      안 되면 태그는 그냥 글자로 읽혀 오히려 나빠진다 → 살리기 전 필수 검증.
@@ -35,9 +35,8 @@ CASES: dict[str, str] = {
     "03_plain_laugh":     "그래요? 정말 웃기네요.",
     "04_laughter":        "그래요? [laughter] 정말 웃기네요.",
     "05_sigh":            "하아... [sigh] 보고 싶었어요.",
-    "06_moan":            "가까이 와요. [moan] 더 가까이.",
-    "07_whisper_tag":     "[whisper] 아무한테도 말하지 마요.",
-    "08_literal_control": "다음 단어를 읽어보세요 breath.",   # 통제군: 'breath' 를 글자로 읽는지 기준
+    "06_whisper_tag":     "[whisper] 아무한테도 말하지 마요.",
+    "07_literal_control": "다음 단어를 읽어보세요 breath.",   # 통제군: 'breath' 를 글자로 읽는지 기준
 }
 
 
@@ -90,8 +89,8 @@ def main() -> None:
         sf.write(path, audio, sr)
         print(f"  ✓ {name:20s} {len(audio)/max(1,sr):4.1f}s  '{text}'  → {path}")
 
-    print("\n판정법: 02/04/05/06/07 을 01/03 과 비교해 들어라.")
-    print("  숨소리·웃음·한숨이 소리로 들리고 08 은 'breath' 를 글자로 읽으면 → 태그 파싱됨(화이트리스트 OK).")
+    print("\n판정법: 02/04/05/06 을 01/03 과 비교해 들어라.")
+    print("  숨소리·웃음·한숨이 소리로 들리고 07 은 'breath' 를 글자로 읽으면 → 태그 파싱됨(화이트리스트 OK).")
     print("  태그 글자를 읽거나 플레인과 동일하면 → 미파싱(orchestrator stripping 유지).")
 
 

@@ -101,7 +101,6 @@ run_all.sh → llama-server(:8090) · cosyvoice-server(:8092) · avatar-server(:
 | 프론트가 보내는 것 | 하는 일 |
 |---|---|
 | `ref_audio_b64` (5~10초 음성) | 목소리 복제 레퍼런스 → `set_reference`(인메모리 b64, `/dev/shm`) |
-| `nsfw: true` (선택) | 섹시/ASMR 모드 → `tts.nsfw_ref_path` 프리셋 레퍼런스로 **교체**(설정 시. 프론트 음성 무시, 미설정이면 폴백) |
 | `portrait_b64` (사진 1장) | 얼굴 → avatar-server 세션 시작 + 첫 프레임 콜드(~30s) 예열 |
 | `persona`/`situation`/캐릭터 카드 | 상황극 페르소나 → LLM `set_context` |
 | `history` (이전 대화) | 대화 이력 복원(클라가 보관·복원, 서버엔 안 남김) |
@@ -157,21 +156,7 @@ sequenceDiagram
 
 인메모리 개인데이터를 **즉시 폐기**: TTS 레퍼런스(`/dev/shm` 삭제) · 대화 이력 · 아바타 세션 해제. 디스크 파일·로그 본문 흔적 0. 대화 이력은 브라우저가 내보내기로 보관.
 
-### 6. 섹시/ASMR(nsfw) 모드 — 레퍼런스만 교체
-
-CosyVoice3 **제로샷 메커니즘을 그대로** 쓰되(Piper/RVC로 교체 안 함), breathy/속삭임 프리셋 클립을 레퍼런스로 준다:
-
-```
-configs/serve.yaml:  tts.nsfw_ref_path / nsfw_ref_text  (5~15초 mono wav + 전사)
-        │
-session_init(nsfw:true) ─→ use_nsfw_reference() ─→ 프리셋 클립을 set_reference
-        │                                            (경로 비면 프론트 음성으로 폴백)
-        └─ 태그([breath]/[moan])는 별개: scripts/tag_ab_test.py 로 이 체크포인트가 파싱하는지 먼저 검증
-```
-
-프리셋은 개인데이터가 아닌 고정 자산이라 인메모리 로드해도 프라이버시 설계는 그대로다.
-
-### 6-1. 준비된 목소리 프리셋(picker) — `data/voice_presets/`
+### 6. 준비된 목소리 프리셋(picker) — `data/voice_presets/`
 
 통화 설정 ①단계에서 **"내 목소리 업로드" ↔ "준비된 목소리"** 를 고를 수 있다. 준비된 목소리는 서버의
 `data/voice_presets/<id>.wav` (+ 선택 `<id>.txt` = 전사)를 **자동 탐색**해 드롭다운에 띄운다(설정 편집 불필요).
@@ -179,8 +164,8 @@ session_init(nsfw:true) ─→ use_nsfw_reference() ─→ 프리셋 클립을 s
 
 ```bash
 # pod 에 클립 올리기(SCP — git 커밋 금지). data/ 는 gitignore = 공개 레포에 안 올라간다.
-scp -P <포트> -i ~/.ssh/id_ed25519 clip.wav root@<IP>:/workspace/callone/data/voice_presets/sultry_ko.wav
-# (선택) 전사도: .../voice_presets/sultry_ko.txt
+scp -P <포트> -i ~/.ssh/id_ed25519 clip.wav root@<IP>:/workspace/callone/data/voice_presets/warm_ko.wav
+# (선택) 전사도: .../voice_presets/warm_ko.txt
 ```
 
 > ⚠️ **권리 있는 클립만** — 본인 녹음 / 동의받은 성인 / CC0·라이선스 / 합성. 실존 인물 무단 음성 금지(README 상단 윤리·관할 법규).

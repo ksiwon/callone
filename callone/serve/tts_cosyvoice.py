@@ -55,10 +55,6 @@ class CosyVoiceTTS:
         self.stream = bool(scfg.get("stream", True))
         self.timeout = float(scfg.get("cosyvoice_timeout", 60.0))
         self.ref_asr_model = str(scfg.get("ref_transcribe_model", "large-v3-turbo"))
-        # 섹시/ASMR 모드용 고정 프리셋 레퍼런스(선택) — nsfw 세션에서 프론트 음성 대신 사용.
-        # 개인데이터 아닌 고정 자산이라 디스크→인메모리 로드 OK. 경로 비면 nsfw 여도 프론트 음성 폴백.
-        self.nsfw_ref_path = str(scfg.get("nsfw_ref_path", "") or "")
-        self.nsfw_ref_text = str(scfg.get("nsfw_ref_text", "") or "")
         # 인메모리 레퍼런스(디스크 0). ref_wav 는 orchestrator 워밍업 게이트용 truthy 마커.
         self._ref_b64: str | None = None
         self._ref_sr: int = 16000
@@ -97,7 +93,7 @@ class CosyVoiceTTS:
         self.ref_wav = ""
 
     def set_reference_from_file(self, path: str, ref_text: str | None = None) -> bool:
-        """디스크 wav → set_reference. 프리셋 레퍼런스(섹시/ASMR 클립)용 — 개인데이터 아닌
+        """디스크 wav → set_reference. 프리셋 목소리(data/voice_presets) 클립용 — 개인데이터 아닌
         고정 자산이라 인메모리 로드 OK. 파일 없거나 읽기 실패면 False. set_reference 가 16k 리샘플."""
         if not path or not os.path.exists(path):
             log.warning("레퍼런스 파일 없음: %s", path)
@@ -112,13 +108,6 @@ class CosyVoiceTTS:
             y = y.mean(axis=1)
         self.set_reference(np.asarray(y, dtype=np.float32), int(sr), ref_text)
         return True
-
-    def use_nsfw_reference(self) -> bool:
-        """섹시/ASMR 모드 — 설정된 고정 breathy 레퍼런스로 교체. 경로 미설정/로드 실패면 False
-        (호출측이 프론트 음성으로 폴백)."""
-        if not self.nsfw_ref_path:
-            return False
-        return self.set_reference_from_file(self.nsfw_ref_path, self.nsfw_ref_text or None)
 
     @staticmethod
     def _resample(a: np.ndarray, src: int, dst: int) -> np.ndarray:
