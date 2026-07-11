@@ -131,21 +131,13 @@ def test_warmup_avatar_noop_when_none():
     fake._warmup_avatar()                           # 예외 없이 즉시 반환
 
 
-# ----- 섹시/ASMR 모드: 세션 레퍼런스 선택(우선순위1) --------------------------
+# ----- 세션 레퍼런스 선택(우선순위: 프리셋 → 프론트 음성) ---------------------
 class _RefTts:
     sr = 24000
 
-    def __init__(self, has_nsfw=True):
+    def __init__(self):
         self.calls: list = []
-        self._has_nsfw = has_nsfw
         self.ref_wav = ""
-
-    def use_nsfw_reference(self):
-        self.calls.append(("nsfw",))
-        if self._has_nsfw:
-            self.ref_wav = "memory"
-            return True
-        return False
 
     def set_reference(self, a, sr, t=None):
         self.calls.append(("caller", len(a), sr))
@@ -163,37 +155,19 @@ def _fake_orch(tts):
     return o
 
 
-def test_nsfw_uses_preset_reference_over_caller():
-    """nsfw=True + 프리셋 지원 → 고정 섹시 레퍼런스 사용, 프론트 음성 무시."""
-    tts = _RefTts(has_nsfw=True)
+def test_caller_reference_used():
+    """프리셋 미선택 → 프론트 음성으로 set_reference."""
+    tts = _RefTts()
     ok = _fake_orch(tts)._apply_session_reference(
-        True, np.zeros(16000, dtype=np.float32), 16000, None)
-    assert ok is True
-    assert tts.calls == [("nsfw",)]                 # caller set_reference 호출 안 됨
-
-
-def test_nsfw_falls_back_to_caller_when_no_preset():
-    """nsfw=True 지만 프리셋 미설정(use_nsfw_reference False) → 프론트 음성으로 폴백."""
-    tts = _RefTts(has_nsfw=False)
-    ok = _fake_orch(tts)._apply_session_reference(
-        True, np.zeros(8000, dtype=np.float32), 16000, None)
-    assert ok is True
-    assert tts.calls == [("nsfw",), ("caller", 8000, 16000)]
-
-
-def test_normal_mode_never_touches_nsfw_reference():
-    """nsfw=False → use_nsfw_reference 안 부르고 프론트 음성만."""
-    tts = _RefTts(has_nsfw=True)
-    ok = _fake_orch(tts)._apply_session_reference(
-        False, np.zeros(4000, dtype=np.float32), 24000, "ref")
+        np.zeros(4000, dtype=np.float32), 24000, "ref")
     assert ok is True
     assert tts.calls == [("caller", 4000, 24000)]
 
 
 def test_no_reference_returns_false():
-    """일반 모드 + 음성 없음 → ref 미설정(False)."""
-    tts = _RefTts(has_nsfw=True)
-    ok = _fake_orch(tts)._apply_session_reference(False, None, 24000, None)
+    """프리셋도 음성도 없음 → ref 미설정(False)."""
+    tts = _RefTts()
+    ok = _fake_orch(tts)._apply_session_reference(None, 24000, None)
     assert ok is False
     assert tts.calls == []
 
@@ -231,34 +205,34 @@ def test_voice_presets_list_and_resolve(tmp_path, monkeypatch):
     from callone.serve import voice_presets as vp
     assert vp.list_presets() == []                    # 폴더 없을 때
     d = tmp_path / "voice_presets"; d.mkdir()
-    (d / "sultry_ko.wav").write_bytes(b"RIFFxxxx")
-    (d / "sultry_ko.txt").write_text("아 보고 싶었어", encoding="utf-8")
+    (d / "warm_ko.wav").write_bytes(b"RIFFxxxx")
+    (d / "warm_ko.txt").write_text("안녕하세요 반가워요", encoding="utf-8")
     (d / "no_text.wav").write_bytes(b"x")
     ids = {p["id"] for p in vp.list_presets()}
-    assert ids == {"sultry_ko", "no_text"}
-    r = vp.resolve("sultry_ko")
-    assert r and r[0].endswith("sultry_ko.wav") and r[1] == "아 보고 싶었어"
+    assert ids == {"warm_ko", "no_text"}
+    r = vp.resolve("warm_ko")
+    assert r and r[0].endswith("warm_ko.wav") and r[1] == "안녕하세요 반가워요"
     assert vp.resolve("no_text")[1] == ""             # .txt 없으면 빈 문자열
     assert vp.resolve("missing") is None
     assert vp.resolve("../secret") is None            # 경로 이탈 차단
 
 
-def test_preset_takes_precedence_over_nsfw_and_caller(monkeypatch):
+def test_preset_takes_precedence_over_caller(monkeypatch):
     from callone.serve import voice_presets as vp
     monkeypatch.setattr(vp, "resolve",
-                        lambda pid: ("/x/sultry.wav", "hi") if pid == "sultry" else None)
-    tts = _RefTts(has_nsfw=True)
+                        lambda pid: ("/x/warm.wav", "hi") if pid == "warm" else None)
+    tts = _RefTts()
     ok = _fake_orch(tts)._apply_session_reference(
-        True, np.zeros(4, dtype=np.float32), 16000, None, preset_id="sultry")
+        np.zeros(4, dtype=np.float32), 16000, None, preset_id="warm")
     assert ok is True
-    assert tts.calls == [("file", "/x/sultry.wav", "hi")]   # nsfw/caller 안 감
+    assert tts.calls == [("file", "/x/warm.wav", "hi")]   # caller 안 감
 
 
-def test_missing_preset_falls_back_to_nsfw(monkeypatch):
+def test_missing_preset_falls_back_to_caller(monkeypatch):
     from callone.serve import voice_presets as vp
     monkeypatch.setattr(vp, "resolve", lambda pid: None)
-    tts = _RefTts(has_nsfw=True)
+    tts = _RefTts()
     ok = _fake_orch(tts)._apply_session_reference(
-        True, None, 16000, None, preset_id="ghost")
+        np.zeros(8000, dtype=np.float32), 16000, None, preset_id="ghost")
     assert ok is True
-    assert tts.calls == [("nsfw",)]                    # 프리셋 실패 → nsfw 폴백
+    assert tts.calls == [("caller", 8000, 16000)]      # 프리셋 실패 → 프론트 음성 폴백

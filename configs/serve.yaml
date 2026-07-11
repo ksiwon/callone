@@ -73,12 +73,6 @@ tts:
   sentence_pause_ms: 180       # 문장 사이 무음(급박함 완화). 0 이면 없음
   # 레퍼런스: 통화 시작 시 프론트가 보낸 음성으로 인메모리 설정(/dev/shm, 끊기면 즉시 삭제) — 제로샷 전용
   #   (ephemeral). 디스크 ref/자동전사/디스크 파일 없음(cosyvoice 백엔드는 인메모리 ref 만 받음).
-  # 섹시/ASMR 모드(선택) — session_init 에 nsfw:true 오면 아래 고정 프리셋 레퍼런스로 교체(프론트 음성 무시).
-  #   breathy/속삭임 5~15초 클립(mono wav, 24k 권장). 개인데이터 아닌 프리셋 자산 → 인메모리 로드.
-  #   경로 비면 nsfw 여도 프론트 음성 그대로(폴백). nsfw_ref_text=클립 전사(ICL 유사도↑, 채우길 권장).
-  #   ⚠️ 태그([breath]/[moan] 등)는 별개 — scripts/tag_ab_test.py 로 이 체크포인트가 파싱하는지 먼저 확인.
-  nsfw_ref_path: ""            # 예: data/refs/sexy_ko_female.wav
-  nsfw_ref_text: ""            # 예: "아... 오빠, 보고 싶었어..."
 # 토킹헤드(사진→움직이는 얼굴, 영상통화) — docs/AVATAR_RUN.md.
 # 증명사진 1장 + TTS 음성 → 입·표정·고개. 음성의 부가 레이어(모델 없으면 정지사진 폴백).
 avatar:
