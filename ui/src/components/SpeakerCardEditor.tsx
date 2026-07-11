@@ -5,24 +5,46 @@ import { useEffect, useState } from "react";
 import styled from "styled-components";
 import { useParams } from "react-router-dom";
 import { getProfile, putProfile, getSamples, SpeakerProfile } from "../api/calloneClient";
+import Wordmark from "./Wordmark";
 
-const Wrap = styled.div`max-width: 560px; margin: 0 auto; padding: 24px; color: ${(p) => p.theme.colors.text};`;
-const Section = styled.div`
-  background: ${(p) => p.theme.colors.surface}; border: 1px solid ${(p) => p.theme.colors.border};
-  border-radius: ${(p) => p.theme.radius}; padding: 16px; margin: 12px 0;
+const Wrap = styled.div`max-width: 560px; margin: 0 auto; padding: 48px 28px 40px;`;
+const Title = styled.h2`
+  font-family: ${(p) => p.theme.font.display}; font-weight: 600; font-size: 26px; margin: 26px 0 8px;
 `;
-const H = styled.h3`margin: 0 0 12px;`;
-const Row = styled.label`display: flex; justify-content: space-between; align-items: center; margin: 8px 0; gap: 12px;`;
+const Rule = styled.hr<{ strong?: boolean }>`
+  border: none; margin: 22px 0;
+  border-top: ${(p) => (p.strong ? `2px solid ${p.theme.colors.ink}` : `1px solid ${p.theme.colors.line}`)};
+`;
+const SecLabel = styled.div`
+  font-family: ${(p) => p.theme.font.mono}; font-size: 11px; letter-spacing: 0.14em;
+  color: ${(p) => p.theme.colors.faint}; text-transform: uppercase; margin: 0 0 12px;
+`;
+const Auto = styled.div`
+  color: ${(p) => p.theme.colors.faint}; font-size: 13px; line-height: 1.8;
+  & b { color: ${(p) => p.theme.colors.ink}; }
+`;
+const Row = styled.label`
+  display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+  padding: 9px 0; border-bottom: 1px solid ${(p) => p.theme.colors.line}; font-size: 14px;
+`;
 const Input = styled.input`
-  flex: 1; background: ${(p) => p.theme.colors.bg}; color: ${(p) => p.theme.colors.text};
-  border: 1px solid ${(p) => p.theme.colors.border}; border-radius: 8px; padding: 8px;
+  flex: 1; max-width: 62%; background: transparent; color: ${(p) => p.theme.colors.ink};
+  border: none; border-bottom: 1px solid transparent; border-radius: 0;
+  padding: 4px 2px; font-size: 14px; text-align: right;
+  &::placeholder { color: ${(p) => p.theme.colors.line}; }
+  &:focus { outline: none; border-bottom-color: ${(p) => p.theme.colors.ink}; }
 `;
-const Auto = styled.div`color: ${(p) => p.theme.colors.sub}; font-size: 13px; line-height: 1.6;`;
 const Save = styled.button`
-  width: 100%; padding: 14px; border: none; border-radius: 12px; cursor: pointer;
-  background: ${(p) => p.theme.colors.primary}; color: #0e1726; font-weight: 700; font-size: 16px;
+  width: 100%; padding: 15px; margin-top: 26px; border: none; cursor: pointer;
+  border-radius: ${(p) => p.theme.radius};
+  background: ${(p) => p.theme.colors.ink}; color: ${(p) => p.theme.colors.paper};
+  font-size: 15px; font-weight: 600;
+  &:hover { background: ${(p) => p.theme.colors.accent}; color: ${(p) => p.theme.colors.onAccent}; }
 `;
-const Sample = styled.div`color: ${(p) => p.theme.colors.sub}; font-size: 13px; padding: 4px 0;`;
+const Sample = styled.div`
+  color: ${(p) => p.theme.colors.faint}; font-size: 13px; line-height: 1.7; padding: 4px 0;
+  & span { font-family: ${(p) => p.theme.font.mono}; font-size: 11px; }
+`;
 
 export default function SpeakerCardEditor() {
   const { id = "A" } = useParams();
@@ -43,43 +65,43 @@ export default function SpeakerCardEditor() {
 
   return (
     <Wrap>
-      <h2>화자 {id} 라벨링</h2>
+      <Wordmark />
+      <Title>화자 기록 — {id}</Title>
+      <Rule strong />
 
-      <Section>
-        <H>자동 추정 (초안 — 수정 가능)</H>
-        <Auto>
-          성별 추정: {prof.auto?.gender_est} · 나이대: {prof.auto?.age_band_est}<br />
-          방언: <b>{d.region_est}</b> (신뢰 {(d.confidence ?? 0).toFixed(2)}),
-          세기 <b>{(d.intensity_0to1 ?? 0).toFixed(2)}</b><br />
-          대표 어미: {(d.markers ?? []).slice(0, 6).map((m: any) => m.form).join(", ") || "없음"}<br />
-          반말율: {(prof.auto?.speech?.banmal_ratio ?? 0).toFixed(2)} ·
-          평균 문장 {(prof.auto?.speech?.avg_sentence_len ?? 0).toFixed(1)}어절
-        </Auto>
-      </Section>
+      <SecLabel>자동 추정 · 초안</SecLabel>
+      <Auto>
+        성별 추정 {prof.auto?.gender_est} · 나이대 {prof.auto?.age_band_est}<br />
+        방언 <b>{d.region_est}</b> (신뢰 {(d.confidence ?? 0).toFixed(2)}) ·
+        세기 <b>{(d.intensity_0to1 ?? 0).toFixed(2)}</b><br />
+        대표 어미 {(d.markers ?? []).slice(0, 6).map((m: any) => m.form).join(", ") || "없음"}<br />
+        반말율 {(prof.auto?.speech?.banmal_ratio ?? 0).toFixed(2)} ·
+        평균 문장 {(prof.auto?.speech?.avg_sentence_len ?? 0).toFixed(1)}어절
+      </Auto>
+      <Rule />
 
-      <Section>
-        <H>대표 발화 (재생)</H>
-        {samples.length === 0 && <Sample>샘플 없음</Sample>}
-        {samples.map((s, i) => <Sample key={i}>▶ {s.text || "(텍스트 없음)"} [{s.call_id} {s.start?.toFixed?.(1)}s]</Sample>)}
-      </Section>
+      <SecLabel>대표 발화</SecLabel>
+      {samples.length === 0 && <Sample>샘플 없음</Sample>}
+      {samples.map((s, i) => (
+        <Sample key={i}>{s.text || "(텍스트 없음)"} <span>[{s.call_id} {s.start?.toFixed?.(1)}s]</span></Sample>
+      ))}
+      <Rule />
 
-      <Section>
-        <H>사람이 확정</H>
-        <Row>이름 <Input value={u.name} onChange={(e) => setU("name", e.target.value)} /></Row>
-        <Row>나이 <Input type="number" value={u.age ?? ""} onChange={(e) => setU("age", Number(e.target.value) || null)} /></Row>
-        <Row>성별 <Input value={u.gender} onChange={(e) => setU("gender", e.target.value)} /></Row>
-        <Row>관계 <Input value={u.relation} onChange={(e) => setU("relation", e.target.value)} /></Row>
-        <Row>호칭 <Input value={u.register} onChange={(e) => setU("register", e.target.value)} placeholder="반말/존댓말" /></Row>
-        <Row>특징 <Input value={u.traits.join(", ")} onChange={(e) => setU("traits", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} /></Row>
-        <Row>입버릇 <Input value={u.catchphrases.join(", ")} onChange={(e) => setU("catchphrases", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} /></Row>
-        <Row>금기 <Input value={u.taboo.join(", ")} onChange={(e) => setU("taboo", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} /></Row>
-        <Row>방언 지역(덮어쓰기) <Input value={u.dialect_region_override ?? ""} onChange={(e) => setU("dialect_region_override", e.target.value || null)} placeholder={d.region_est} /></Row>
-        <Row>방언 세기(덮어쓰기 0~1) <Input type="number" step="0.01" value={u.dialect_intensity_override ?? ""} onChange={(e) => setU("dialect_intensity_override", e.target.value === "" ? null : Number(e.target.value))} placeholder={String(d.intensity_0to1 ?? "")} /></Row>
-        <Row>방언 확인됨 <input type="checkbox" checked={u.dialect_confirmed} onChange={(e) => setU("dialect_confirmed", e.target.checked)} /></Row>
-      </Section>
+      <SecLabel>사람이 확정</SecLabel>
+      <Row>이름 <Input value={u.name} onChange={(e) => setU("name", e.target.value)} /></Row>
+      <Row>나이 <Input type="number" value={u.age ?? ""} onChange={(e) => setU("age", Number(e.target.value) || null)} /></Row>
+      <Row>성별 <Input value={u.gender} onChange={(e) => setU("gender", e.target.value)} /></Row>
+      <Row>관계 <Input value={u.relation} onChange={(e) => setU("relation", e.target.value)} /></Row>
+      <Row>호칭 <Input value={u.register} onChange={(e) => setU("register", e.target.value)} placeholder="반말/존댓말" /></Row>
+      <Row>특징 <Input value={u.traits.join(", ")} onChange={(e) => setU("traits", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} /></Row>
+      <Row>입버릇 <Input value={u.catchphrases.join(", ")} onChange={(e) => setU("catchphrases", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} /></Row>
+      <Row>금기 <Input value={u.taboo.join(", ")} onChange={(e) => setU("taboo", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} /></Row>
+      <Row>방언 지역(덮어쓰기) <Input value={u.dialect_region_override ?? ""} onChange={(e) => setU("dialect_region_override", e.target.value || null)} placeholder={d.region_est} /></Row>
+      <Row>방언 세기(덮어쓰기 0~1) <Input type="number" step="0.01" value={u.dialect_intensity_override ?? ""} onChange={(e) => setU("dialect_intensity_override", e.target.value === "" ? null : Number(e.target.value))} placeholder={String(d.intensity_0to1 ?? "")} /></Row>
+      <Row>방언 확인됨 <input type="checkbox" checked={u.dialect_confirmed} onChange={(e) => setU("dialect_confirmed", e.target.checked)} /></Row>
 
       <Save onClick={async () => { await putProfile(id, prof); setSaved(true); }}>
-        {saved ? "저장됨 ✓" : "프로필 저장"}
+        {saved ? "저장됨" : "프로필 저장"}
       </Save>
     </Wrap>
   );

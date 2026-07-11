@@ -1,112 +1,215 @@
 // CallScreen — 영상통화: 설정(음성·사진·페르소나·대화 불러오기) → 통화(음성+얼굴) → 내보내기.
 // 프라이버시: 음성/사진/대화는 **브라우저(클라)가 소유**. 통화 시작 시 서버로 보내 인메모리만 쓰고,
 // 끊기면 서버에서 즉시 폐기(디스크·로그에 안 남음). 대화 이력은 localStorage + 파일 export/import.
+// 디자인: call:one 전시 언어 — 종이·잉크·주홍, 서식형 셋업, 대본형 통화 기록. 에러 메시지는 "!" 접두.
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { useParams, useNavigate } from "react-router-dom";
 import { CallSocket, fileToBase64, previewVoice, listVoicePresets, analyzeVoiceStart, analyzeVoiceStatus, analyzeVoiceSave, rememberCall, type Turn, type SessionInit, type VoicePreset, type AnalyzeStatus } from "../api/calloneClient";
+import Wordmark from "./Wordmark";
 
+/* ── 셋업(서식) ── */
 const Screen = styled.div`
   min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-  justify-content: space-between; padding: 32px 24px; gap: 16px;
-  background: linear-gradient(180deg, #0e1726, #172234);
+  padding: 44px 28px 36px; gap: 4px;
 `;
-const Who = styled.div`text-align: center; color: ${(p) => p.theme.colors.text};`;
-const Big = styled.div`font-size: 28px; font-weight: 700;`;
-const Status = styled.div`color: ${(p) => p.theme.colors.sub}; margin-top: 8px;`;
-const Wave = styled.div<{ active: boolean }>`
-  display: flex; gap: 4px; height: 48px; align-items: center;
-  & span {
-    width: 4px; background: ${(p) => p.theme.colors.accent}; border-radius: 2px;
-    animation: ${(p) => (p.active ? "bounce 0.8s infinite" : "none")};
+const SetupHead = styled.div`
+  width: 100%; max-width: 520px; display: flex; align-items: baseline;
+  justify-content: space-between; margin-bottom: 6px;
+`;
+const HeadNote = styled.div`
+  font-family: ${(p) => p.theme.font.mono}; font-size: 11px; letter-spacing: 0.14em;
+  color: ${(p) => p.theme.colors.faint}; text-transform: uppercase;
+`;
+const StepIndex = styled.div`
+  width: 100%; max-width: 520px; display: flex; gap: 22px; margin: 14px 0 2px;
+  border-bottom: 2px solid ${(p) => p.theme.colors.ink}; padding-bottom: 10px;
+`;
+const StepItem = styled.div<{ $on: boolean; $done: boolean }>`
+  font-family: ${(p) => p.theme.font.mono}; font-size: 12px; letter-spacing: 0.06em;
+  color: ${(p) => (p.$on ? p.theme.colors.ink : p.theme.colors.faint)};
+  font-weight: ${(p) => (p.$on ? 700 : 400)};
+  & em { font-style: normal; color: ${(p) => (p.$done || p.$on ? p.theme.colors.accent : "inherit")}; }
+`;
+const Setup = styled.div`
+  width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: 14px; padding-top: 18px;
+  & label { font-size: 13px; color: ${(p) => p.theme.colors.faint}; }
+  & input[type="text"], & textarea {
+    width: 100%; padding: 9px 2px; font-size: 15px; color: ${(p) => p.theme.colors.ink};
+    background: transparent; border: none; border-bottom: 1px solid ${(p) => p.theme.colors.line};
+    border-radius: 0;
+    &::placeholder { color: ${(p) => p.theme.colors.line}; }
+    &:focus { outline: none; border-bottom: 2px solid ${(p) => p.theme.colors.ink}; }
   }
-  @keyframes bounce { 0%,100%{height:8px} 50%{height:40px} }
 `;
-/* ── 통화화면: 좌우 반반 split (좌=영상 꽉, 우=정보/채팅/버튼). 좁으면 세로 스택. ── */
+const StepTitle = styled.div`
+  font-family: ${(p) => p.theme.font.display}; font-size: 24px; font-weight: 600;
+  & span { font-family: ${(p) => p.theme.font.mono}; font-size: 14px; font-weight: 400;
+    color: ${(p) => p.theme.colors.accent}; margin-right: 10px; }
+`;
+const StepHint = styled.div`font-size: 13px; color: ${(p) => p.theme.colors.faint}; margin: -6px 0 6px;`;
+const Seg = styled.div`display: flex; border: 1px solid ${(p) => p.theme.colors.ink};`;
+const SegBtn = styled.button<{ $on: boolean }>`
+  flex: 1; padding: 10px 6px; cursor: pointer; font-size: 13px; font-weight: 600; border: none;
+  background: ${(p) => (p.$on ? p.theme.colors.ink : "transparent")};
+  color: ${(p) => (p.$on ? p.theme.colors.paper : p.theme.colors.faint)};
+  & + & { border-left: 1px solid ${(p) => p.theme.colors.line}; }
+`;
+const FileBox = styled.label`
+  display: block; border: 1px dashed ${(p) => p.theme.colors.faint};
+  padding: 16px 14px; cursor: pointer; text-align: center;
+  font-size: 13px; color: ${(p) => p.theme.colors.faint} !important;
+  & input { display: none; }
+  &:hover { border-color: ${(p) => p.theme.colors.ink}; color: ${(p) => p.theme.colors.ink} !important; }
+  & b { color: ${(p) => p.theme.colors.ink}; font-weight: 600; }
+`;
+const Btn = styled.button<{ danger?: boolean }>`
+  padding: 11px 18px; cursor: pointer; font-size: 14px; font-weight: 600;
+  border-radius: ${(p) => p.theme.radius};
+  border: 1px solid ${(p) => (p.danger ? p.theme.colors.accent : p.theme.colors.ink)};
+  background: ${(p) => (p.danger ? p.theme.colors.accent : "transparent")};
+  color: ${(p) => (p.danger ? p.theme.colors.onAccent : p.theme.colors.ink)};
+  &:hover:not(:disabled) { background: ${(p) => (p.danger ? "#9e3524" : p.theme.colors.ink)};
+    color: ${(p) => p.theme.colors.paper}; }
+  &:disabled { opacity: 0.35; cursor: default; }
+`;
+const Solid = styled.button`
+  padding: 13px 26px; cursor: pointer; font-size: 15px; font-weight: 600; border: none;
+  border-radius: ${(p) => p.theme.radius};
+  background: ${(p) => p.theme.colors.ink}; color: ${(p) => p.theme.colors.paper};
+  &:hover:not(:disabled) { background: ${(p) => p.theme.colors.accent}; color: ${(p) => p.theme.colors.onAccent}; }
+  &:disabled { opacity: 0.35; cursor: default; }
+`;
+const Ghost = styled.button`
+  padding: 13px 18px; cursor: pointer; font-size: 14px; border: none; background: transparent;
+  color: ${(p) => p.theme.colors.faint};
+  &:hover:not(:disabled) { color: ${(p) => p.theme.colors.ink}; }
+  &:disabled { opacity: 0.4; cursor: default; }
+`;
+const Preview = styled.button`
+  align-self: flex-start; padding: 9px 16px; cursor: pointer; font-size: 13px; font-weight: 600;
+  border: 1px solid ${(p) => p.theme.colors.ink}; background: transparent; border-radius: ${(p) => p.theme.radius};
+  color: ${(p) => p.theme.colors.ink};
+  &:hover:not(:disabled) { background: ${(p) => p.theme.colors.ink}; color: ${(p) => p.theme.colors.paper}; }
+  &:disabled { opacity: 0.4; cursor: default; }
+`;
+const Note = styled.div<{ err?: boolean }>`
+  font-size: 13px; line-height: 1.65;
+  color: ${(p) => (p.err ? p.theme.colors.accent : p.theme.colors.faint)};
+`;
+const Thumb = styled.img`
+  width: 128px; height: 128px; object-fit: cover;
+  border: 1px solid ${(p) => p.theme.colors.ink}; padding: 3px; background: #fff;
+`;
+const Fold = styled.details`
+  border-top: 1px solid ${(p) => p.theme.colors.line}; padding: 12px 0 0;
+  & > summary { cursor: pointer; font-size: 13px; color: ${(p) => p.theme.colors.faint}; list-style: none; }
+  & > summary::before { content: "+ "; color: ${(p) => p.theme.colors.accent}; }
+  &[open] > summary::before { content: "− "; }
+  & > div { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+`;
+const PresetRow = styled.div`display: flex; gap: 8px; flex-wrap: wrap;`;
+const Chip = styled.button`
+  padding: 7px 14px; cursor: pointer; font-size: 13px; background: transparent;
+  border: 1px solid ${(p) => p.theme.colors.line}; border-radius: ${(p) => p.theme.radius};
+  color: ${(p) => p.theme.colors.ink};
+  &:hover { border-color: ${(p) => p.theme.colors.accent}; color: ${(p) => p.theme.colors.accent}; }
+`;
+const CandRow = styled.div<{ $on: boolean }>`
+  display: flex; align-items: center; gap: 12px; padding: 12px 10px; cursor: pointer;
+  border: 1px solid ${(p) => (p.$on ? p.theme.colors.ink : p.theme.colors.line)};
+  background: ${(p) => (p.$on ? "#fff" : "transparent")};
+`;
+const CandMeta = styled.div`
+  font-family: ${(p) => p.theme.font.mono}; font-size: 11.5px; color: ${(p) => p.theme.colors.faint};
+  margin-top: 3px;
+`;
+const Consent = styled.label`
+  display: flex; align-items: center; gap: 10px; cursor: pointer;
+  font-size: 13px; color: ${(p) => p.theme.colors.ink} !important;
+  border-top: 1px solid ${(p) => p.theme.colors.line}; padding-top: 12px;
+`;
+const NavRow = styled.div`
+  width: 100%; max-width: 520px; display: flex; justify-content: space-between;
+  border-top: 2px solid ${(p) => p.theme.colors.ink}; margin-top: 26px; padding-top: 14px;
+`;
+
+/* ── 통화화면: 좌=영상(밤) / 우=대본·상태(종이). 좁으면 세로 스택. ── */
 const Split = styled.div`
-  height: 100vh; display: flex; background: linear-gradient(180deg, #0e1726, #172234);
+  height: 100vh; display: flex;
   @media (max-width: 760px) { flex-direction: column; }
 `;
 const VideoSide = styled.div`
   flex: 1; min-width: 0; min-height: 0; display: flex; align-items: center;
-  justify-content: center; background: #000; padding: 12px;
+  justify-content: center; background: ${(p) => p.theme.colors.night}; padding: 12px;
 `;
 const Avatar = styled.canvas`
   /* 좌측 섹션을 꽉 채움: 비율 유지(contain)로 가로/세로 중 먼저 닿는 쪽까지 키움. */
-  width: 100%; height: 100%; object-fit: contain; border-radius: 12px;
+  width: 100%; height: 100%; object-fit: contain;
+`;
+const Wave = styled.div<{ active: boolean }>`
+  display: flex; gap: 5px; height: 48px; align-items: center;
+  & span {
+    width: 3px; background: ${(p) => p.theme.colors.onNight}; opacity: 0.9;
+    animation: ${(p) => (p.active ? "bounce 0.8s infinite" : "none")};
+  }
+  @keyframes bounce { 0%,100%{height:8px} 50%{height:40px} }
 `;
 const InfoSide = styled.div`
   flex: 1; min-width: 0; display: flex; flex-direction: column;
-  padding: 24px 20px; gap: 16px; color: ${(p) => p.theme.colors.text};
+  padding: 28px 26px 20px; gap: 14px;
 `;
-const Chat = styled.div`
+const CallHead = styled.div`
+  border-bottom: 2px solid ${(p) => p.theme.colors.ink}; padding-bottom: 14px;
+`;
+const CallName = styled.div`
+  font-family: ${(p) => p.theme.font.display}; font-size: 30px; font-weight: 600;
+`;
+const StatusLine = styled.div`
+  display: flex; align-items: baseline; gap: 12px; margin-top: 8px;
+  font-family: ${(p) => p.theme.font.mono}; font-size: 12.5px; color: ${(p) => p.theme.colors.faint};
+  & .colon { color: ${(p) => p.theme.colors.accent}; }
+`;
+const LiveDot = styled.span<{ $live: boolean }>`
+  width: 8px; height: 8px; border-radius: 50%; align-self: center;
+  background: ${(p) => (p.$live ? p.theme.colors.accent : p.theme.colors.line)};
+`;
+const CloneTag = styled.span`
+  border: 1px solid ${(p) => p.theme.colors.line}; padding: 2px 8px;
+  font-size: 10.5px; letter-spacing: 0.1em;
+`;
+/* 대본(transcript): 말풍선 대신 화자 라벨 + 본문 — 인쇄 대본의 결 */
+const Script = styled.div`
   flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
-  gap: 8px; padding-right: 4px;
+  gap: 13px; padding: 6px 2px;
 `;
-const Bubble = styled.div<{ me: boolean }>`
-  align-self: ${(p) => (p.me ? "flex-end" : "flex-start")};
-  max-width: 78%; padding: 9px 13px; border-radius: 16px; font-size: 14px; line-height: 1.45;
-  white-space: pre-wrap; word-break: break-word;
-  background: ${(p) => (p.me ? p.theme.colors.accent : p.theme.colors.surface)};
-  color: ${(p) => (p.me ? "#06202b" : p.theme.colors.text)};
-  ${(p) => (p.me ? "border-bottom-right-radius: 4px;" : "border-bottom-left-radius: 4px;")}
+const LineRow = styled.div`display: flex; gap: 14px; align-items: baseline;`;
+const SpeakerTag = styled.div<{ $me: boolean }>`
+  flex: none; width: 72px; text-align: right;
+  font-family: ${(p) => p.theme.font.mono}; font-size: 11px; letter-spacing: 0.05em;
+  color: ${(p) => (p.$me ? p.theme.colors.faint : p.theme.colors.accent)};
+  padding-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+`;
+const LineText = styled.div<{ $dim?: boolean }>`
+  flex: 1; font-size: 14.5px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+  color: ${(p) => p.theme.colors.ink}; opacity: ${(p) => (p.$dim ? 0.45 : 1)};
 `;
 const SysNote = styled.div`
-  align-self: center; font-size: 12px; color: ${(p) => p.theme.colors.sub};
-  padding: 2px 8px;
+  align-self: center; font-family: ${(p) => p.theme.font.mono}; font-size: 11.5px;
+  color: ${(p) => p.theme.colors.faint}; padding: 2px 8px;
 `;
-const Controls = styled.div`display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;`;
-const Btn = styled.button<{ danger?: boolean }>`
-  padding: 14px 20px; border-radius: 28px; border: none; cursor: pointer;
-  color: #fff; font-size: 14px;
-  background: ${(p) => (p.danger ? p.theme.colors.danger : p.theme.colors.surface)};
+const Controls = styled.div`
+  display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-start;
+  border-top: 1px solid ${(p) => p.theme.colors.line}; padding-top: 14px;
 `;
-const Setup = styled.div`
-  width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 12px;
-  color: ${(p) => p.theme.colors.text};
-  & label { font-size: 13px; color: ${(p) => p.theme.colors.sub}; }
-  & input[type="text"], & textarea {
-    width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #2a3a52;
-    background: #0c1422; color: #fff; font-size: 14px;
-  }
-`;
-/* ── 단계형 셋업(stepper): 상단 진행 점 + 단계별 본문 + 이전/다음 ── */
-const Steps = styled.div`display: flex; gap: 8px; width: 100%; max-width: 460px; margin-bottom: 4px;`;
-const StepDot = styled.div<{ on: boolean; done: boolean }>`
-  flex: 1; height: 6px; border-radius: 3px;
-  background: ${(p) => (p.done ? p.theme.colors.accent : p.on ? p.theme.colors.primary : p.theme.colors.border)};
-`;
-const StepTitle = styled.div`font-size: 18px; font-weight: 700; color: ${(p) => p.theme.colors.text};`;
-const StepHint = styled.div`font-size: 13px; color: ${(p) => p.theme.colors.sub}; margin: 2px 0 8px;`;
-const Preview = styled.button`
-  align-self: flex-start; padding: 9px 14px; border-radius: 18px; border: none; cursor: pointer;
-  background: ${(p) => p.theme.colors.accent}; color: #06202b; font-weight: 700; font-size: 13px;
-  &:disabled { opacity: 0.5; cursor: default; }
-`;
-const Note = styled.div<{ err?: boolean }>`
-  font-size: 13px; color: ${(p) => (p.err ? p.theme.colors.danger : p.theme.colors.sub)};
-`;
-const Thumb = styled.img`
-  width: 120px; height: 120px; object-fit: cover; border-radius: 12px;
-  border: 1px solid ${(p) => p.theme.colors.border};
-`;
-const Fold = styled.details`
-  border: 1px solid ${(p) => p.theme.colors.border}; border-radius: 10px; padding: 8px 12px;
-  & > summary { cursor: pointer; font-size: 13px; color: ${(p) => p.theme.colors.sub}; }
-  & > div { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
-`;
-const Ghost = styled.button`
-  padding: 12px 18px; border-radius: 24px; cursor: pointer; font-size: 14px;
-  background: transparent; color: ${(p) => p.theme.colors.sub}; border: 1px solid ${(p) => p.theme.colors.border};
+const Ctl = styled.button<{ $accent?: boolean }>`
+  padding: 10px 14px; cursor: pointer; font-size: 13px; font-weight: 600;
+  border-radius: ${(p) => p.theme.radius};
+  border: 1px solid ${(p) => (p.$accent ? p.theme.colors.accent : p.theme.colors.line)};
+  background: ${(p) => (p.$accent ? p.theme.colors.accent : "transparent")};
+  color: ${(p) => (p.$accent ? p.theme.colors.onAccent : p.theme.colors.ink)};
+  &:hover:not(:disabled) { border-color: ${(p) => (p.$accent ? "#9e3524" : p.theme.colors.ink)}; }
   &:disabled { opacity: 0.4; cursor: default; }
-`;
-/* ── 예시 캐릭터 칩(원클릭 프리셋) ── */
-const PresetRow = styled.div`display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;`;
-const Chip = styled.button`
-  padding: 7px 12px; border-radius: 16px; cursor: pointer; font-size: 13px;
-  background: ${(p) => p.theme.colors.surface}; color: ${(p) => p.theme.colors.text};
-  border: 1px solid ${(p) => p.theme.colors.border};
-  &:hover { border-color: ${(p) => p.theme.colors.accent}; }
 `;
 
 // 캐릭터 카드 프리셋 — 누르면 설정 칸이 채워진다(수정 가능). example_dialogue 는 캐릭터챗 말투의
@@ -211,7 +314,7 @@ export default function CallScreen() {
   const [anaStatus, setAnaStatus] = useState<AnalyzeStatus | null>(null);
   const [anaSpeaker, setAnaSpeaker] = useState("");         // 고른 화자 id
   const [anaName, setAnaName] = useState("");               // 저장할 프리셋 이름
-  const [anaMsg, setAnaMsg] = useState("");                 // 진행/에러 안내
+  const [anaMsg, setAnaMsg] = useState("");                 // 진행/에러 안내("!" 접두 = 에러)
   const [anaBusy, setAnaBusy] = useState(false);
   const [presets, setPresets] = useState<VoicePreset[]>([]);
   const [presetId, setPresetId] = useState("");
@@ -226,10 +329,10 @@ export default function CallScreen() {
   const historyRef = useRef<Turn[]>([]);
 
   // 단계형 셋업 상태
-  const [step, setStep] = useState(1);                  // 1 목소리 · 2 얼굴 · 3 캐릭터 · 4 시작
+  const [step, setStep] = useState(1);                  // 1 목소리 · 2 얼굴 · 3 관계 · 4 연결
   const [refText, setRefText] = useState("");           // 참조 음성 전사(자동→수정 가능, 유사도↑)
   const [previewing, setPreviewing] = useState(false);
-  const [previewMsg, setPreviewMsg] = useState("");     // 미리듣기 안내/에러
+  const [previewMsg, setPreviewMsg] = useState("");     // 미리듣기 안내/에러("!" 접두 = 에러)
   const [photoUrl, setPhotoUrl] = useState("");         // 사진 미리보기 objectURL
   const [foldOpen, setFoldOpen] = useState(false);      // 캐릭터 '더 자세히' 펼침(프리셋 적용 시 자동)
   const previewCtxRef = useRef<AudioContext | null>(null);  // 미리듣기 재생 전용
@@ -252,7 +355,7 @@ export default function CallScreen() {
     } catch { /* noop */ }
   }, [HKEY]);
 
-  // 서버에 준비된 프리셋 목소리 목록(있으면 '준비된 목소리' 탭에 표시)
+  // 서버에 준비된 프리셋 목소리 목록(있으면 '등록된 목소리' 탭에 표시)
   useEffect(() => { listVoicePresets().then(setPresets).catch(() => setPresets([])); }, []);
 
   // 플로우 B: 분석 job 폴링(2s) — done/error 에서 멈춤
@@ -264,7 +367,7 @@ export default function CallScreen() {
         setAnaStatus(st);
         if (st.stage === "done" || st.stage === "error") clearInterval(t);
       } catch (e: any) {
-        setAnaMsg(`⚠️ ${e?.message || "분석 조회 실패"}`); clearInterval(t);
+        setAnaMsg(`! ${e?.message || "분석 조회 실패"}`); clearInterval(t);
       }
     }, 2000);
     return () => clearInterval(t);
@@ -272,11 +375,11 @@ export default function CallScreen() {
 
   async function startAnalyze(f: File | null) {
     if (!f) return;
-    setAnaStatus(null); setAnaSpeaker(""); setAnaMsg("업로드 중… (긴 파일은 수십 초)");
+    setAnaStatus(null); setAnaSpeaker(""); setAnaMsg("업로드 중 — 긴 파일은 수십 초");
     try {
       const jid = await analyzeVoiceStart(f);
       setAnaJob(jid); setAnaMsg("");
-    } catch (e: any) { setAnaMsg(`⚠️ ${e?.message || "업로드 실패"}`); }
+    } catch (e: any) { setAnaMsg(`! ${e?.message || "업로드 실패"}`); }
   }
 
   async function saveAnalyzed() {
@@ -285,9 +388,9 @@ export default function CallScreen() {
     try {
       const r = await analyzeVoiceSave(anaJob, anaSpeaker, anaName.trim());
       const list = await listVoicePresets(); setPresets(list);
-      setPresetId(r.preset_id); setVoiceSource("preset");     // 저장 즉시 '준비된 목소리'로 합류
-      setAnaMsg(`✅ '${r.preset_id}' 저장됨(${r.dur}s) — 아래에서 미리듣고 다음으로.`);
-    } catch (e: any) { setAnaMsg(`⚠️ ${e?.message || "저장 실패"}`); }
+      setPresetId(r.preset_id); setVoiceSource("preset");     // 저장 즉시 '등록된 목소리'로 합류
+      setAnaMsg(`'${r.preset_id}' 저장됨 (${r.dur}s) — 아래에서 미리듣고 다음으로.`);
+    } catch (e: any) { setAnaMsg(`! ${e?.message || "저장 실패"}`); }
     finally { setAnaBusy(false); }
   }
 
@@ -344,10 +447,10 @@ export default function CallScreen() {
     try {
       const r = await rememberCall(id, historyRef.current);
       setChat((c) => [...c, { who: "sys", text: r.added
-        ? `🧠 기억 ${r.added}개 저장 (총 ${r.total}) — 다음 통화부터 기억해요`
-        : "🧠 새로 기억할 만한 내용이 없었어요" }]);
+        ? `기억 ${r.added}개 저장 (총 ${r.total}) — 다음 통화부터 기억해요`
+        : "새로 기억할 만한 내용이 없었어요" }]);
     } catch (e: any) {
-      setChat((c) => [...c, { who: "sys", text: `⚠️ ${e?.message || "기억 저장 실패"}` }]);
+      setChat((c) => [...c, { who: "sys", text: `! ${e?.message || "기억 저장 실패"}` }]);
     } finally { setMemBusy(false); }
   }
 
@@ -355,7 +458,7 @@ export default function CallScreen() {
     setStarted(true);
     setStatus("");
     setCS("connecting");
-    // 이어하기: 저장된 이력을 채팅 말풍선으로 미리 표시(user=나, assistant=상대).
+    // 이어하기: 저장된 이력을 대본으로 미리 표시(user=나, assistant=상대).
     setChat(historyRef.current.map((m) => ({ who: (m.role === "user" ? "me" : "them") as "me" | "them", text: m.content })));
     const sock = new CallSocket(id, {
       // A/V 동기: 오디오·프레임을 턴 버퍼에 모았다가 audio_end 에서 동시에 재생.
@@ -366,7 +469,7 @@ export default function CallScreen() {
         setChat((c) => [...c, { who: "them", text }]);
       },
       onUser: (text) => {
-        setPartial("");                                  // 최종 전사 도착 → 자막을 말풍선으로 승격
+        setPartial("");                                  // 최종 전사 도착 → 자막을 대본으로 승격
         if (text.trim()) { historyRef.current.push({ role: "user", content: text }); persist();
           setChat((c) => [...c, { who: "me", text }]); }
       },
@@ -418,7 +521,7 @@ export default function CallScreen() {
   // 복제 목소리 미리듣기 — 업로드 음성으로 짧은 문장 합성해 재생(통화 전 유사도 확인).
   async function runPreview() {
     if (!voiceFile) return;
-    setPreviewing(true); setPreviewMsg("합성 중… (첫 회는 전사 포함 ~수 초)");
+    setPreviewing(true); setPreviewMsg("합성 중 — 첫 회는 전사 포함 몇 초");
     try {
       const b64 = await fileToBase64(voiceFile);
       const { refText: rt, audio, sr } = await previewVoice(b64, { refText: refText.trim() || undefined });
@@ -429,9 +532,9 @@ export default function CallScreen() {
       const buf = ctx.createBuffer(1, audio.length, sr);
       buf.getChannelData(0).set(audio);   // copyToChannel 대신 set — 버퍼 타입(ArrayBufferLike) 무관, 타입세이프
       const node = ctx.createBufferSource(); node.buffer = buf; node.connect(ctx.destination); node.start();
-      setPreviewMsg("▶ 재생 중 — 본인 목소리 같으면 다음으로.");
+      setPreviewMsg("재생 중 — 본인 목소리 같으면 다음으로.");
     } catch (e: any) {
-      setPreviewMsg(`⚠️ ${e?.message || "미리듣기 실패"} (cosyvoice-server 확인)`);
+      setPreviewMsg(`! ${e?.message || "미리듣기 실패"} (cosyvoice-server 확인)`);
     } finally { setPreviewing(false); }
   }
 
@@ -445,7 +548,7 @@ export default function CallScreen() {
       proc.onaudioprocess = (e) => {
         if (mutedRef.current) return;
         // 말하는 중(재생)엔 마이크를 안 보낸다 — 스피커 에코가 다음 턴 버퍼/전사를 오염시키는 것 방지.
-        // 음성 barge-in 대신 🤚 버튼(bargeIn) 사용(C.AI Calls 와 같은 UX — REBUILD_PLAN §0).
+        // 음성 barge-in 대신 끼어들기 버튼(bargeIn) 사용(C.AI Calls 와 같은 UX — REBUILD_PLAN §0).
         if (callStateRef.current === "speaking") return;
         const pcm = new Float32Array(e.inputBuffer.getChannelData(0));
         sock.sendAudio(pcm);
@@ -573,7 +676,7 @@ export default function CallScreen() {
   function importHistory(file: File) {
     file.text().then((t) => {
       try { historyRef.current = JSON.parse(t); persist(); setChat((c) => [...c, { who: "sys", text: `대화 ${historyRef.current.length}개 불러옴` }]); }
-      catch { setChat((c) => [...c, { who: "sys", text: "불러오기 실패: JSON 아님" }]); }
+      catch { setChat((c) => [...c, { who: "sys", text: "! 불러오기 실패: JSON 아님" }]); }
     });
   }
   function clearHistory() {
@@ -587,127 +690,133 @@ export default function CallScreen() {
   const ss = String(sec % 60).padStart(2, "0");
   const turns = Math.floor(historyRef.current.length / 2);
 
-  // ---- 설정 화면(통화 전): 단계형 — ①목소리 ②얼굴 ③캐릭터 ④시작 ----
+  // ---- 설정 화면(통화 전): 서식형 — 01 목소리 · 02 얼굴 · 03 관계 · 04 연결 ----
   if (!started) {
     const STEP_META = [
       ["목소리", "복제할 목소리를 올리고 미리 들어보세요 (필수)"],
       ["얼굴", "영상통화용 사진 — 없으면 음성통화 (선택)"],
-      ["캐릭터", "누구이고 나와 무슨 사이인지 (선택)"],
-      ["시작", "이전 대화 이어가기 · 통화 시작"],
+      ["관계", "누구이고 나와 무슨 사이인지 (선택)"],
+      ["연결", "이전 대화 이어가기 · 통화 시작"],
     ];
     const next = () => setStep((s) => Math.min(4, s + 1));
     const prev = () => setStep((s) => Math.max(1, s - 1));
     return (
       <Screen>
-        <Who><Big>{id}</Big><Status>통화 준비 · 개인데이터는 내 브라우저만 보관</Status></Who>
-        <Steps>
-          {STEP_META.map((_, i) => <StepDot key={i} on={step === i + 1} done={step > i + 1} />)}
-        </Steps>
+        <SetupHead>
+          <Wordmark />
+          <HeadNote>새 통화 준비 — {id}</HeadNote>
+        </SetupHead>
+        <StepIndex>
+          {STEP_META.map(([t], i) => (
+            <StepItem key={t} $on={step === i + 1} $done={step > i + 1}>
+              <em>{String(i + 1).padStart(2, "0")}</em> {t}
+            </StepItem>
+          ))}
+        </StepIndex>
         <Setup>
-          <StepTitle>{step}. {STEP_META[step - 1][0]}</StepTitle>
+          <StepTitle><span>{String(step).padStart(2, "0")}</span>{STEP_META[step - 1][0]}</StepTitle>
           <StepHint>{STEP_META[step - 1][1]}</StepHint>
 
           {step === 1 && (<>
             <label>어떤 자료를 갖고 있나요?</label>
-            <div style={{ display: "flex", gap: 8 }}>
+            <Seg>
               {(["own", "call", "preset"] as const).map((m) => (
-                <button key={m} type="button" onClick={() => setVoiceSource(m)}
-                  style={{ flex: 1, padding: 9, borderRadius: 8, cursor: "pointer", fontWeight: 600,
-                    border: voiceSource === m ? "1px solid #7aa2f7" : "1px solid #2a3a52",
-                    background: voiceSource === m ? "#7aa2f7" : "#0c1422",
-                    color: voiceSource === m ? "#0e1726" : "#fff" }}>
+                <SegBtn key={m} type="button" $on={voiceSource === m} onClick={() => setVoiceSource(m)}>
                   {m === "own" ? "짧은 목소리 파일"
                     : m === "call" ? "긴 통화 녹음"
-                    : `준비된 목소리${presets.length ? ` (${presets.length})` : ""}`}
-                </button>
+                    : `등록된 목소리${presets.length ? ` (${presets.length})` : ""}`}
+                </SegBtn>
               ))}
-            </div>
+            </Seg>
 
             {voiceSource === "own" && (<>
-              <label>그 사람 목소리 파일 (5~15초, 깨끗할수록 좋아요 — wav/mp3/m4a)</label>
-              <input type="file" accept="audio/*" onChange={(e) => { setVoiceFile(e.target.files?.[0] ?? null); setPreviewMsg(""); }} />
-              {voiceFile && <Preview onClick={runPreview} disabled={previewing}>{previewing ? "합성 중…" : "🔊 복제 목소리 미리듣기"}</Preview>}
-              {previewMsg && <Note err={previewMsg.startsWith("⚠️")}>{previewMsg}</Note>}
+              <FileBox>
+                {voiceFile ? <b>{voiceFile.name}</b> : <>목소리 파일 선택 — <b>5~15초</b>, 깨끗할수록 좋아요 · wav / mp3 / m4a</>}
+                <input type="file" accept="audio/*" onChange={(e) => { setVoiceFile(e.target.files?.[0] ?? null); setPreviewMsg(""); }} />
+              </FileBox>
+              {voiceFile && <Preview onClick={runPreview} disabled={previewing}>{previewing ? "합성 중…" : "복제 목소리 미리듣기"}</Preview>}
+              {previewMsg && <Note err={previewMsg.startsWith("!")}>{previewMsg}</Note>}
               {voiceFile && (<>
-                <label>참조 음성 내용 (전사 — 정확할수록 유사도↑, 수정 가능)</label>
+                <label>참조 음성 내용 (전사 — 정확할수록 유사도가 올라가요, 수정 가능)</label>
                 <input type="text" value={refText} onChange={(e) => setRefText(e.target.value)} placeholder="미리듣기를 누르면 자동으로 채워집니다" />
               </>)}
-              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <Consent>
                 <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
                 이 목소리의 주인에게 사용 동의를 받았어요 (본인 목소리 포함)
-              </label>
+              </Consent>
             </>)}
 
             {voiceSource === "call" && (<>
-              <label>통화 녹음 파일 (몇 시간짜리도 OK — m4a/mp3/wav)</label>
               <Note>서버가 화자를 분리해 "그 사람" 목소리의 가장 깨끗한 구간을 자동으로 찾아드려요.
                 원본은 분석 후 즉시 삭제되고, 저장을 눌러야만 목소리가 등록돼요.</Note>
-              <input type="file" accept="audio/*"
-                onChange={(e) => startAnalyze(e.target.files?.[0] ?? null)} />
+              <FileBox>
+                통화 녹음 파일 선택 — <b>몇 시간짜리도 OK</b> · m4a / mp3 / wav
+                <input type="file" accept="audio/*"
+                  onChange={(e) => startAnalyze(e.target.files?.[0] ?? null)} />
+              </FileBox>
               {anaJob && anaStatus?.stage !== "done" && anaStatus?.stage !== "error" && (
-                <Note>⏳ {anaStatus?.stage === "diarize" ? "화자 분리 중… (긴 녹음은 몇 분 걸려요)"
+                <Note>{anaStatus?.stage === "diarize" ? "화자 분리 중 — 긴 녹음은 몇 분 걸려요"
                   : anaStatus?.stage === "scoring" ? "좋은 구간 고르는 중…"
                   : "분석 준비 중…"}</Note>
               )}
-              {anaStatus?.stage === "error" && <Note err>⚠️ {anaStatus.error}</Note>}
+              {anaStatus?.stage === "error" && <Note err>! {anaStatus.error}</Note>}
               {anaStatus?.stage === "done" && (<>
                 {anaStatus.dummy_diarizer &&
-                  <Note err>⚠️ 정밀 화자분리 모델(pyannote)이 서버에 없어 구분이 부정확할 수 있어요 —
+                  <Note err>! 정밀 화자분리 모델(pyannote)이 서버에 없어 구분이 부정확할 수 있어요 —
                     serve venv 에 pip install pyannote.audio + HF_TOKEN 설정 권장.</Note>}
                 <label>누가 "그 사람"인가요? 들어보고 고르세요</label>
                 {(anaStatus.speakers ?? []).map((s, i) => (
-                  <div key={s.id} onClick={() => setAnaSpeaker(s.id)}
-                    style={{ display: "flex", alignItems: "center", gap: 10, padding: 10, marginBottom: 6,
-                      borderRadius: 8, cursor: "pointer",
-                      border: anaSpeaker === s.id ? "1px solid #7aa2f7" : "1px solid #2a3a52",
-                      background: anaSpeaker === s.id ? "#16233b" : "#0c1422" }}>
+                  <CandRow key={s.id} $on={anaSpeaker === s.id} onClick={() => setAnaSpeaker(s.id)}>
                     <input type="radio" checked={anaSpeaker === s.id} onChange={() => setAnaSpeaker(s.id)} />
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600 }}>화자 {i + 1}</div>
-                      <div style={{ fontSize: 12, opacity: 0.7 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>화자 {i + 1}</div>
+                      <CandMeta>
                         발화 {Math.round(s.total_sec / 60)}분 {Math.round(s.total_sec % 60)}초 · {s.n_segments}구간 · 음질 {s.best_snr}dB
-                      </div>
+                      </CandMeta>
                     </div>
                     <audio controls preload="none" style={{ height: 32, maxWidth: 180 }}
                       src={`data:audio/wav;base64,${s.sample_wav_b64}`} />
-                  </div>
+                  </CandRow>
                 ))}
                 {anaSpeaker && (<>
                   <label>이 목소리의 이름 (예: 엄마, 나은)</label>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
                     <input type="text" value={anaName} onChange={(e) => setAnaName(e.target.value)}
-                      placeholder="프리셋 이름" style={{ flex: 1 }} />
+                      placeholder="등록할 이름" style={{ flex: 1 }} />
                     <Btn onClick={saveAnalyzed} disabled={anaBusy || !anaName.trim() || !consent}>
                       {anaBusy ? "저장 중…" : "이 목소리 쓰기"}
                     </Btn>
                   </div>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <Consent>
                     <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
                     이 목소리의 주인에게 사용 동의를 받았어요
-                  </label>
+                  </Consent>
                 </>)}
               </>)}
-              {anaMsg && <Note err={anaMsg.startsWith("⚠️")}>{anaMsg}</Note>}
+              {anaMsg && <Note err={anaMsg.startsWith("!")}>{anaMsg}</Note>}
             </>)}
 
             {voiceSource === "preset" && (<>
-              <label>준비된 목소리 선택</label>
+              <label>등록된 목소리 선택</label>
               {presets.length ? (
                 <select value={presetId} onChange={(e) => setPresetId(e.target.value)}
-                  style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #2a3a52", background: "#0c1422", color: "#fff", fontSize: 14 }}>
+                  style={{ width: "100%", padding: "10px 2px", border: "none", borderBottom: "1px solid #CBC3B0",
+                    borderRadius: 0, background: "transparent", color: "#221E16", fontSize: 15 }}>
                   <option value="">— 목소리 고르기 —</option>
                   {presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
               ) : (
-                <Note>준비된 목소리가 없어요. '긴 통화 녹음' 탭에서 추출하거나, 서버 data/voice_presets/ 에 wav 를 올리면(scp) 여기 떠요. (권리 있는 클립만)</Note>
+                <Note>등록된 목소리가 없어요. '긴 통화 녹음' 탭에서 추출하거나, 서버 data/voice_presets/ 에 wav 를 올리면(scp) 여기 떠요. (권리 있는 클립만)</Note>
               )}
-              {anaMsg && <Note err={anaMsg.startsWith("⚠️")}>{anaMsg}</Note>}
+              {anaMsg && <Note err={anaMsg.startsWith("!")}>{anaMsg}</Note>}
             </>)}
           </>)}
 
           {step === 2 && (<>
-            <label>증명사진 (얼굴, jpg/png)</label>
-            <input type="file" accept="image/*" onChange={(e) => pickPhoto(e.target.files?.[0] ?? null)} />
+            <FileBox>
+              {photoFile ? <b>{photoFile.name}</b> : <>증명사진 선택 — 얼굴이 잘 보이는 정면 · jpg / png</>}
+              <input type="file" accept="image/*" onChange={(e) => pickPhoto(e.target.files?.[0] ?? null)} />
+            </FileBox>
             {photoUrl
               ? <Thumb src={photoUrl} alt="얼굴 미리보기" />
               : <Note>사진을 올리면 영상통화(움직이는 얼굴), 없으면 음성통화로 진행돼요.</Note>}
@@ -744,33 +853,38 @@ export default function CallScreen() {
 
           {step === 4 && (<>
             <label>이전 대화 불러오기 (이어하기) {turns > 0 ? `· 저장된 ${turns}턴 있음` : ""}</label>
-            <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importHistory(e.target.files[0])} />
+            <FileBox>
+              대화 파일 선택 — callone_*.json
+              <input type="file" accept="application/json" onChange={(e) => e.target.files?.[0] && importHistory(e.target.files[0])} />
+            </FileBox>
             <Note>
-              {hasVoice ? (voiceSource === "preset" ? `✓ 목소리(${presetId})` : "✓ 목소리") : "· 목소리 없음"}{photoFile ? " · ✓ 얼굴" : " · 음성통화"}{persona ? ` · ✓ ${persona}` : ""}
+              {hasVoice ? (voiceSource === "preset" ? `목소리 ✓ (${presetId})` : "목소리 ✓") : "목소리 — 아직"}
+              {photoFile ? " · 얼굴 ✓" : " · 음성통화"}
+              {persona ? ` · ${persona}` : ""}
             </Note>
             {turns > 0 && (
-              <Controls style={{ justifyContent: "flex-start" }}>
+              <div style={{ display: "flex", gap: 10 }}>
                 <Btn onClick={exportHistory}>대화 내보내기</Btn>
-                <Btn danger onClick={clearHistory}>🗑 기억 리셋</Btn>
-              </Controls>
+                <Btn danger onClick={clearHistory}>기억 리셋</Btn>
+              </div>
             )}
           </>)}
         </Setup>
 
-        <Controls>
+        <NavRow>
           {step > 1 ? <Ghost onClick={prev}>← 이전</Ghost> : <Ghost onClick={() => nav("/")}>취소</Ghost>}
           {step < 4
-            ? <Btn onClick={next} disabled={step === 1 && !hasVoice}>다음 →</Btn>
-            : <Btn onClick={startCall} disabled={!hasVoice}>📞 통화 시작</Btn>}
-        </Controls>
+            ? <Solid onClick={next} disabled={step === 1 && !hasVoice}>다음 →</Solid>
+            : <Solid onClick={startCall} disabled={!hasVoice}>통화 걸기</Solid>}
+        </NavRow>
       </Screen>
     );
   }
 
-  // ---- 통화 화면: 좌=영상 / 우=정보·채팅·버튼 ----
+  // ---- 통화 화면: 좌=영상 / 우=대본·상태·버튼 ----
   const CS_LABEL: Record<typeof callState, string> = {
-    connecting: "연결 중…", listening: "🎧 듣는 중",
-    thinking: "💭 생각 중", speaking: "🗣 말하는 중",
+    connecting: "연결 중", listening: "듣는 중",
+    thinking: "생각 중", speaking: "말하는 중",
   };
   return (
     <Split>
@@ -784,18 +898,36 @@ export default function CallScreen() {
         )}
       </VideoSide>
       <InfoSide>
-        <Who><Big>{id}</Big><Status>{CS_LABEL[callState]} · {mm}:{ss} · 🤖 AI 클론 음성</Status></Who>
-        {status && <SysNote>⚠️ {status}</SysNote>}
-        {sec > 1800 && <SysNote>☕ 30분 넘게 통화 중이에요 — 잠깐 쉬어가도 좋아요.</SysNote>}
-        <Chat>
+        <CallHead>
+          <CallName>{id}</CallName>
+          <StatusLine>
+            <LiveDot $live={callState === "speaking" || callState === "listening"} />
+            <span>{CS_LABEL[callState]}</span>
+            <span>{mm}<span className="colon">:</span>{ss}</span>
+            <CloneTag>AI 클론 음성</CloneTag>
+          </StatusLine>
+        </CallHead>
+        {status && <SysNote>! {status}</SysNote>}
+        {sec > 1800 && <SysNote>30분 넘게 통화 중이에요 — 잠깐 쉬어가도 좋아요.</SysNote>}
+        <Script>
           {chat.map((c, i) => c.who === "sys"
             ? <SysNote key={i}>{c.text}</SysNote>
-            : <Bubble key={i} me={c.who === "me"}>{c.text}</Bubble>)}
-          {partial && <Bubble me style={{ opacity: 0.55 }}>{partial} …</Bubble>}
-        </Chat>
+            : (
+              <LineRow key={i}>
+                <SpeakerTag $me={c.who === "me"}>{c.who === "me" ? "나" : id}</SpeakerTag>
+                <LineText>{c.text}</LineText>
+              </LineRow>
+            ))}
+          {partial && (
+            <LineRow>
+              <SpeakerTag $me>나</SpeakerTag>
+              <LineText $dim>{partial} …</LineText>
+            </LineRow>
+          )}
+        </Script>
         {showHud && lastTiming && (
           <SysNote>
-            ⏱ asr {Math.round(lastTiming.asr_ms || 0)} ·
+            asr {Math.round(lastTiming.asr_ms || 0)} ·
             llm {Math.round(lastTiming.llm_first_ms || 0)}/{Math.round(lastTiming.llm_total_ms || 0)} ·
             tts {Math.round(lastTiming.tts_first_ms || 0)} ·
             첫음성 {Math.round(lastTiming.first_audio_ms || 0)}ms
@@ -803,19 +935,19 @@ export default function CallScreen() {
         )}
         <Controls>
           {(callState === "speaking" || callState === "thinking") &&
-            <Btn onClick={bargeIn}>🤚 끼어들기</Btn>}
-          <Btn onClick={toggleMute}>{muted ? "음소거 해제" : "음소거"}</Btn>
-          <Btn onClick={toggleAutoTurn} title="말 끝나면(0.9s 무음) 자동으로 응답">
+            <Ctl onClick={bargeIn}>끼어들기</Ctl>}
+          <Ctl onClick={toggleMute}>{muted ? "음소거 해제" : "음소거"}</Ctl>
+          <Ctl onClick={toggleAutoTurn} title="말 끝나면(0.9s 무음) 자동으로 응답">
             {autoTurn ? "자동 응답 ✓" : "자동 응답 끔"}
-          </Btn>
-          {!autoTurn && <Btn onClick={sendTurn}>응답 전송</Btn>}
-          <Btn onClick={() => setShowHud((v) => !v)} title="단계별 지연(ms)">⏱</Btn>
-          <Btn onClick={rememberThisCall} disabled={memBusy}
+          </Ctl>
+          {!autoTurn && <Ctl onClick={sendTurn}>응답 전송</Ctl>}
+          <Ctl onClick={() => setShowHud((v) => !v)} title="단계별 지연(ms)">지연</Ctl>
+          <Ctl onClick={rememberThisCall} disabled={memBusy}
             title="오늘 대화의 사실을 기억에 저장 — 다음 통화부터 회상">
-            {memBusy ? "기억 중…" : "🧠 기억시키기"}</Btn>
-          <Btn onClick={exportHistory}>대화 내보내기</Btn>
-          <Btn onClick={farewellAndEnd} title="클론이 작별 인사를 한 뒤 끊어요">👋 작별하고 종료</Btn>
-          <Btn danger onClick={endCall}>바로 종료</Btn>
+            {memBusy ? "기억 중…" : "기억하기"}</Ctl>
+          <Ctl onClick={exportHistory}>내보내기</Ctl>
+          <Ctl onClick={farewellAndEnd} title="클론이 작별 인사를 한 뒤 끊어요">작별하고 종료</Ctl>
+          <Ctl $accent onClick={endCall}>종료</Ctl>
         </Controls>
       </InfoSide>
     </Split>

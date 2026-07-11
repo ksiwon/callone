@@ -1,33 +1,50 @@
-// ProcessingView — 풀튜닝(풀클론) 학습 파이프라인 안내.
+// ProcessingView — 풀 클론(풀튜닝) 학습 파이프라인 안내.
 // 통화는 5~10초 제로샷이 기본(셋업에서 바로). 1시간+ 녹음으로 화자 모델을 "학습"하려면
 // 이 파이프라인을 서버에서 스크립트로 돌린다(브라우저에선 실행 X — 오프라인 GPU 작업).
 import styled from "styled-components";
 import { Link } from "react-router-dom";
+import Wordmark from "./Wordmark";
 
-const Wrap = styled.div`max-width: 680px; margin: 0 auto; padding: 24px; color: ${(p) => p.theme.colors.text};`;
-const Lead = styled.div`color: ${(p) => p.theme.colors.sub}; font-size: 14px; line-height: 1.6; margin: 8px 0 20px;`;
-const Card = styled.div`
-  background: ${(p) => p.theme.colors.surface}; border: 1px solid ${(p) => p.theme.colors.border};
-  border-radius: ${(p) => p.theme.radius}; padding: 16px 18px; margin: 12px 0;
+const Wrap = styled.div`max-width: 680px; margin: 0 auto; padding: 48px 28px 40px;`;
+const Title = styled.h2`
+  font-family: ${(p) => p.theme.font.display}; font-weight: 600; font-size: 26px; margin: 26px 0 8px;
+`;
+const Lead = styled.p`
+  color: ${(p) => p.theme.colors.faint}; font-size: 14px; line-height: 1.75; margin: 0 0 8px;
+  & b { color: ${(p) => p.theme.colors.ink}; font-weight: 600; }
+`;
+const Rule = styled.hr<{ strong?: boolean }>`
+  border: none; margin: 22px 0;
+  border-top: ${(p) => (p.strong ? `2px solid ${p.theme.colors.ink}` : `1px solid ${p.theme.colors.line}`)};
+`;
+const SecLabel = styled.div`
+  font-family: ${(p) => p.theme.font.mono}; font-size: 11px; letter-spacing: 0.14em;
+  color: ${(p) => p.theme.colors.faint}; text-transform: uppercase; margin: 0 0 10px;
 `;
 const Step = styled.div`
-  display: flex; gap: 12px; align-items: flex-start; padding: 12px 0;
-  border-bottom: 1px solid ${(p) => p.theme.colors.border};
+  display: flex; gap: 16px; align-items: baseline; padding: 12px 0;
+  border-bottom: 1px solid ${(p) => p.theme.colors.line};
   &:last-child { border-bottom: none; }
 `;
 const Num = styled.span`
-  flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
-  background: ${(p) => p.theme.colors.primary}; color: #0e1726; font-weight: 700; font-size: 13px;
-`;
-const Sub = styled.div`color: ${(p) => p.theme.colors.sub}; font-size: 13px; line-height: 1.5;`;
-const Code = styled.code`
-  display: block; background: ${(p) => p.theme.colors.bg}; border: 1px solid ${(p) => p.theme.colors.border};
-  border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-top: 6px; white-space: pre-wrap;
+  flex: none; font-family: ${(p) => p.theme.font.mono}; font-size: 13px;
   color: ${(p) => p.theme.colors.accent};
 `;
-const Pill = styled.span`
-  display: inline-block; background: ${(p) => p.theme.colors.bg}; border: 1px solid ${(p) => p.theme.colors.border};
-  border-radius: 999px; padding: 2px 10px; font-size: 12px; color: ${(p) => p.theme.colors.sub}; margin: 2px 6px 2px 0;
+const StepName = styled.div`font-family: ${(p) => p.theme.font.display}; font-size: 16px;`;
+const Sub = styled.div`color: ${(p) => p.theme.colors.faint}; font-size: 13px; line-height: 1.6; margin-top: 2px;`;
+const Code = styled.code`
+  display: block; background: ${(p) => p.theme.colors.night}; color: ${(p) => p.theme.colors.onNight};
+  border-radius: ${(p) => p.theme.radius}; padding: 14px 16px; margin-top: 10px;
+  font-family: ${(p) => p.theme.font.mono}; font-size: 12.5px; line-height: 1.7; white-space: pre-wrap;
+`;
+const Tag = styled.span`
+  display: inline-block; border: 1px solid ${(p) => p.theme.colors.line};
+  border-radius: ${(p) => p.theme.radius}; padding: 3px 10px; margin: 2px 8px 2px 0;
+  font-family: ${(p) => p.theme.font.mono}; font-size: 12px; color: ${(p) => p.theme.colors.faint};
+`;
+const Back = styled(Link)`
+  color: ${(p) => p.theme.colors.accent}; font-size: 14px; text-decoration: none;
+  &:hover { text-decoration: underline; }
 `;
 
 // 현재 스택(EXAONE / CosyVoice3 / Ditto)에 맞춘 파이프라인 단계.
@@ -43,46 +60,48 @@ const STAGES: [string, string][] = [
 export default function ProcessingView() {
   return (
     <Wrap>
-      <h2>🧬 내 목소리 모델 학습 (풀튜닝)</h2>
+      <Wordmark />
+      <Title>풀 클론 파이프라인</Title>
       <Lead>
-        통화는 <b>5~10초 제로샷</b>이 기본이라 셋업에서 바로 됩니다. 더 높은 음색·운율 충실도가 필요하면
-        <b> 1시간+ 녹음</b>으로 화자 전용 모델을 학습할 수 있어요. 학습은 브라우저가 아니라
-        <b> 서버(GPU)</b>에서 아래 스크립트로 1회 돌리는 오프라인 작업입니다.
+        통화는 <b>5~10초 제로샷</b>이 기본이라 셋업에서 바로 됩니다. 더 높은 음색·운율 충실도가
+        필요하면 <b>1시간 이상의 녹음</b>으로 화자 전용 모델을 학습합니다. 학습은 브라우저가 아니라
+        <b> 서버(GPU)</b>에서 아래 스크립트로 한 번 돌리는 오프라인 작업입니다.
       </Lead>
+      <Rule strong />
 
-      <Card>
-        <div style={{ marginBottom: 8 }}>현재 스택</div>
-        <Pill>LLM · EXAONE-3.5-7.8B</Pill>
-        <Pill>TTS · CosyVoice3-0.5B</Pill>
-        <Pill>아바타 · Ditto</Pill>
-        <Pill>ASR · faster-whisper</Pill>
-      </Card>
+      <SecLabel>현재 스택</SecLabel>
+      <div>
+        <Tag>LLM · EXAONE-3.5-7.8B</Tag>
+        <Tag>TTS · CosyVoice3-0.5B</Tag>
+        <Tag>아바타 · Ditto</Tag>
+        <Tag>ASR · faster-whisper</Tag>
+      </div>
+      <Rule />
 
-      <Card>
-        {STAGES.map(([t, d], i) => (
-          <Step key={t}>
-            <Num>{i + 1}</Num>
-            <div><div>{t}</div><Sub>{d}</Sub></div>
-          </Step>
-        ))}
-      </Card>
+      <SecLabel>여섯 단계</SecLabel>
+      {STAGES.map(([t, d], i) => (
+        <Step key={t}>
+          <Num>{String(i + 1).padStart(2, "0")}</Num>
+          <div><StepName>{t}</StepName><Sub>{d}</Sub></div>
+        </Step>
+      ))}
+      <Rule />
 
-      <Card>
-        <div style={{ marginBottom: 4 }}>서버에서 실행</div>
-        <Sub>녹음을 <code>data/raw/</code>에 넣고 학습 → 학습된 화자로 통화하면 끝.</Sub>
-        <Code>{`# 1) 데이터 처리 + 화자 학습(풀튜닝)
+      <SecLabel>서버에서 실행</SecLabel>
+      <Sub>녹음을 <code>data/raw/</code>에 넣고 학습 → 학습된 화자로 통화하면 끝.</Sub>
+      <Code>{`# 1) 데이터 처리 + 화자 학습(풀튜닝)
 bash scripts/setup_train.sh        # 최초 1회: 학습 환경
 bash scripts/run_full.sh           # 전 단계 데이터셋 생성
 # 목소리는 학습 불필요 — 통화 시작 시 음성 업로드(제로샷 클론)
 
 # 2) 서비스 기동 후 통화 화면에서 학습된 화자 선택
 bash scripts/run_all.sh            # llama/cosyvoice/avatar/serve`}</Code>
-        <Sub style={{ marginTop: 8 }}>
-          빠른 검증만 하려면 <code>scripts/run_pilot.sh</code>(소량 샘플)로 파이프라인만 돌려볼 수 있어요.
-        </Sub>
-      </Card>
+      <Sub style={{ marginTop: 10 }}>
+        빠른 검증만 하려면 <code>scripts/run_pilot.sh</code>(소량 샘플)로 파이프라인만 돌려볼 수 있어요.
+      </Sub>
 
-      <p><Link to="/" style={{ color: "#7aa2f7" }}>← 홈으로</Link></p>
+      <Rule />
+      <Back to="/">← 홈으로</Back>
     </Wrap>
   );
 }

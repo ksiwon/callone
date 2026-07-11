@@ -1,43 +1,57 @@
-// ContactList (§17.1) — 바로 통화 시작(프라이버시 흐름: 음성·사진은 통화화면서 업로드) + 화자 목록.
+// ContactList (§17.1) — 바로 통화 시작(프라이버시 흐름: 음성·사진은 통화화면서 업로드) + 화자 명부.
 import { useEffect, useState } from "react";
 import styled from "styled-components";
 import { Link, useNavigate } from "react-router-dom";
 import { listSpeakers, SpeakerSummary } from "../api/calloneClient";
+import Wordmark from "./Wordmark";
 
-const Wrap = styled.div`padding: 24px; max-width: 480px; margin: 0 auto;`;
-const Title = styled.h1`color: ${(p) => p.theme.colors.text}; font-size: 22px;`;
-const Avatar = styled.div`
-  width: 48px; height: 48px; border-radius: 50%;
-  background: ${(p) => p.theme.colors.primary};
-  display: grid; place-items: center; color: #0e1726; font-weight: 700;
+const Wrap = styled.div`padding: 48px 28px 40px; max-width: 560px; margin: 0 auto;`;
+const Tagline = styled.p`
+  margin: 10px 0 0; font-family: ${(p) => p.theme.font.display};
+  font-size: 15px; color: ${(p) => p.theme.colors.faint};
 `;
-const Name = styled.div`color: ${(p) => p.theme.colors.text}; font-weight: 600;`;
-const Sub = styled.div`color: ${(p) => p.theme.colors.sub}; font-size: 13px;`;
-const Empty = styled.div`color: ${(p) => p.theme.colors.sub}; margin-top: 40px; text-align: center;`;
-const StartRow = styled.div`
-  display: flex; align-items: center; gap: 12px;
-  background: ${(p) => p.theme.colors.surface};
-  border: 1px solid ${(p) => p.theme.colors.border};
-  border-radius: ${(p) => p.theme.radius}; padding: 16px; margin: 12px 0;
+const Rule = styled.hr<{ strong?: boolean }>`
+  border: none; margin: 22px 0;
+  border-top: ${(p) => (p.strong ? `2px solid ${p.theme.colors.ink}` : `1px solid ${p.theme.colors.line}`)};
 `;
-// 저장된 화자 카드(통화/편집 두 액션) — Link 중첩 방지 위해 div + 내부 링크.
-const SpeakerCard = styled.div`
-  display: flex; align-items: center; gap: 16px;
-  background: ${(p) => p.theme.colors.surface};
-  border: 1px solid ${(p) => p.theme.colors.border};
-  border-radius: ${(p) => p.theme.radius};
-  padding: 16px; margin: 12px 0;
+const FieldLabel = styled.div`
+  font-family: ${(p) => p.theme.font.mono}; font-size: 11px; letter-spacing: 0.14em;
+  color: ${(p) => p.theme.colors.faint}; text-transform: uppercase; margin-bottom: 8px;
 `;
-const MiniLink = styled(Link)`
-  text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 16px; white-space: nowrap;
-  background: ${(p) => p.theme.colors.bg}; border: 1px solid ${(p) => p.theme.colors.border};
-  color: ${(p) => p.theme.colors.text};
+const LineInput = styled.input`
+  width: 100%; padding: 8px 2px; font-size: 17px; color: ${(p) => p.theme.colors.ink};
+  background: transparent; border: none; border-bottom: 1px solid ${(p) => p.theme.colors.line};
+  border-radius: 0;
+  &::placeholder { color: ${(p) => p.theme.colors.line}; }
+  &:focus { outline: none; border-bottom: 2px solid ${(p) => p.theme.colors.ink}; }
 `;
-const Advanced = styled(Link)`
-  display: flex; align-items: center; justify-content: space-between; gap: 12px; text-decoration: none;
-  background: ${(p) => p.theme.colors.surface}; border: 1px dashed ${(p) => p.theme.colors.border};
-  border-radius: ${(p) => p.theme.radius}; padding: 14px 16px; margin: 20px 0 12px;
-  color: ${(p) => p.theme.colors.text};
+const CallBtn = styled.button`
+  padding: 13px 26px; border: none; border-radius: ${(p) => p.theme.radius}; cursor: pointer;
+  background: ${(p) => p.theme.colors.ink}; color: ${(p) => p.theme.colors.paper};
+  font-size: 15px; font-weight: 600; white-space: nowrap;
+  &:hover { background: ${(p) => p.theme.colors.accent}; color: ${(p) => p.theme.colors.onAccent}; }
+`;
+const Row = styled.div`
+  display: flex; align-items: center; gap: 16px; padding: 16px 2px;
+  border-bottom: 1px solid ${(p) => p.theme.colors.line};
+`;
+const Name = styled.div`font-family: ${(p) => p.theme.font.display}; font-size: 18px;`;
+const Meta = styled.div`
+  font-family: ${(p) => p.theme.font.mono}; font-size: 12px; color: ${(p) => p.theme.colors.faint};
+  margin-top: 3px;
+`;
+const TextLink = styled(Link)<{ $accent?: boolean }>`
+  font-size: 14px; text-decoration: none; white-space: nowrap; padding: 6px 2px;
+  color: ${(p) => (p.$accent ? p.theme.colors.accent : p.theme.colors.faint)};
+  border-bottom: 1px solid transparent;
+  &:hover { border-bottom-color: currentColor; }
+`;
+const Empty = styled.div`
+  color: ${(p) => p.theme.colors.faint}; margin-top: 36px; font-size: 14px; line-height: 1.7;
+`;
+const Foot = styled.div`
+  margin-top: 44px; font-family: ${(p) => p.theme.font.mono}; font-size: 11px;
+  color: ${(p) => p.theme.colors.faint}; line-height: 1.8;
 `;
 
 export default function ContactList() {
@@ -50,45 +64,57 @@ export default function ContactList() {
     listSpeakers().then((s) => { setSpeakers(s); setLoaded(true); });
   }, []);
 
+  const go = () => nav(`/call/${encodeURIComponent(label.trim() || "me")}`);
+
   return (
     <Wrap>
-      <Title>callone</Title>
-      <Sub>바로 통화 — 음성·사진은 다음 화면에서 올립니다(서버에 안 남음)</Sub>
-      <StartRow>
-        <input
+      <Wordmark size={34} />
+      <Tagline>지금 없는 목소리와, 지금 통화하기</Tagline>
+      <Rule strong />
+
+      <FieldLabel>01 — 누구에게 걸까요</FieldLabel>
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-end" }}>
+        <LineInput
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="상대 이름(대화 저장 라벨)"
-          style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid #2a3a52", background: "#0c1422", color: "#fff" }}
+          onKeyDown={(e) => e.key === "Enter" && go()}
+          placeholder="이름 (대화 저장 라벨)"
         />
-        <button
-          onClick={() => nav(`/call/${encodeURIComponent(label.trim() || "me")}`)}
-          style={{ padding: "10px 16px", borderRadius: 20, border: "none", background: "#7aa2f7", color: "#0e1726", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
-        >📞 통화 시작</button>
-      </StartRow>
-      {speakers.length > 0 && <Sub style={{ marginTop: 24 }}>저장된 화자 (풀튜닝 학습본)</Sub>}
-      {speakers.map((s) => (
-        <SpeakerCard key={s.speaker_id}>
-          <Avatar>{(s.name || s.speaker_id)[0]}</Avatar>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Name>{s.name || `화자 ${s.speaker_id}`}</Name>
-            <Sub>{s.relation || "관계 미입력"} · {s.region}</Sub>
-          </div>
-          <MiniLink to={`/editor/${s.speaker_id}`}>편집</MiniLink>
-          <MiniLink to={`/call/${s.speaker_id}`} style={{ background: "#7aa2f7", color: "#0e1726", fontWeight: 700, border: "none" }}>통화</MiniLink>
-        </SpeakerCard>
-      ))}
+        <CallBtn onClick={go}>통화 걸기</CallBtn>
+      </div>
+
+      {speakers.length > 0 && (<>
+        <Rule />
+        <FieldLabel>등록된 화자 — 풀 클론 학습본</FieldLabel>
+        {speakers.map((s) => (
+          <Row key={s.speaker_id}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Name>{s.name || `화자 ${s.speaker_id}`}</Name>
+              <Meta>{s.relation || "관계 미입력"} · {s.region}</Meta>
+            </div>
+            <TextLink to={`/editor/${s.speaker_id}`}>편집</TextLink>
+            <TextLink to={`/call/${s.speaker_id}`} $accent>통화 →</TextLink>
+          </Row>
+        ))}
+      </>)}
       {loaded && speakers.length === 0 && (
-        <Empty>저장된 화자가 없어도 됩니다 — 위에서 바로 통화하세요.<br />(음성·사진은 통화 화면에서 직접 업로드)</Empty>
+        <Empty>등록된 화자가 없어도 됩니다 — 위에서 바로 거세요.<br />
+          음성과 사진은 통화 화면에서 올립니다.</Empty>
       )}
 
-      <Advanced to="/processing">
-        <div>
-          <Name>🧬 내 목소리 모델 학습 (풀튜닝)</Name>
-          <Sub>1시간+ 녹음으로 화자 전용 모델 — 더 높은 음색 충실도</Sub>
+      <Rule />
+      <Row style={{ borderBottom: "none", padding: "6px 2px" }}>
+        <div style={{ flex: 1 }}>
+          <Name style={{ fontSize: 16 }}>풀 클론 파이프라인</Name>
+          <Meta>한 시간 이상의 녹음으로 말투·기억까지 — 서버 학습 안내</Meta>
         </div>
-        <span style={{ color: "#7aa2f7" }}>→</span>
-      </Advanced>
+        <TextLink to="/processing" $accent>보기 →</TextLink>
+      </Row>
+
+      <Foot>
+        음성·사진·대화는 이 브라우저가 보관합니다. 서버는 통화 동안만 메모리에 두고,<br />
+        수화기를 내려놓는 순간 지웁니다. — call:one
+      </Foot>
     </Wrap>
   );
 }
