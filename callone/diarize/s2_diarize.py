@@ -113,6 +113,18 @@ def _load_pyannote(diarizer: str, fallback: str | None):
     raise RuntimeError(f"pyannote 파이프라인 로드 불가: {last_err}")
 
 
+def overlap_flags(turns: list[tuple[float, float, str]], min_ov: float = 0.15) -> list[bool]:
+    """턴별 겹침발화 여부 — **다른 화자** 턴과 min_ov 초 이상 겹치면 True.
+
+    겹침발화는 화자 임베딩/TTS 학습셋/제로샷 ref 의 오염원이라 하류(s2b clean 플래그,
+    build_tts, pick_ref_clip)가 이 플래그로 거른다. (v2 전엔 미계산 → 필터가 무동작이었음.)"""
+    out = []
+    for i, (s, e, spk) in enumerate(turns):
+        out.append(any(j != i and o_spk != spk and min(e, o_e) - max(s, o_s) >= min_ov
+                       for j, (o_s, o_e, o_spk) in enumerate(turns)))
+    return out
+
+
 def diarize_pyannote(wav: str, cfg: dict) -> list[Segment]:
     """pyannote.audio 직접 경로 (whisperx 불필요, 로컬 CPU 가능).
 
@@ -133,9 +145,12 @@ def diarize_pyannote(wav: str, cfg: dict) -> list[Segment]:
 
     # pyannote 4.x 는 DiarizeOutput 반환 → .speaker_diarization(Annotation). 3.x 는 Annotation 직접.
     annotation = getattr(diar, "speaker_diarization", diar)
+    turns = [(float(t.start), float(t.end), spk)
+             for t, _, spk in annotation.itertracks(yield_label=True)]
+    ov = overlap_flags(turns)
+
     segs = []
-    for turn, _, spk in annotation.itertracks(yield_label=True):
-        s, e = float(turn.start), float(turn.end)
+    for (s, e, spk), is_ov in zip(turns, ov):
         if e - s < 0.4:
             continue
         clip = y[int(s * sr): int(e * sr)]
@@ -143,8 +158,10 @@ def diarize_pyannote(wav: str, cfg: dict) -> list[Segment]:
             start=round(s, 3), end=round(e, 3),
             local_speaker=spk,                     # SPEAKER_00 / SPEAKER_01
             text="", snr_db=round(estimate_snr_db(clip), 1),
+            overlap=is_ov,
         ))
-    log.info("pyannote 분리 완료: %d 세그먼트", len(segs))
+    log.info("pyannote 분리 완료: %d 세그먼트(겹침 %d)", len(segs),
+             sum(1 for x in segs if x.overlap))
     return segs
 
 

@@ -168,6 +168,10 @@ sequenceDiagram
 # pod 에 클립 올리기(SCP — git 커밋 금지). data/ 는 gitignore = 공개 레포에 안 올라간다.
 scp -P <포트> -i ~/.ssh/id_ed25519 clip.wav root@<IP>:/workspace/callone/data/voice_presets/warm_ko.wav
 # (선택) 전사도: .../voice_presets/warm_ko.txt
+
+# 긴 녹음에서 최적 레퍼런스 자동 추출(SNR·길이 점수화 → 프리셋으로 저장, 전사 포함):
+python scripts/pick_ref_clip.py --wav long_recording.m4a --name mom --top 3   # 단일화자 파일
+python scripts/pick_ref_clip.py --speaker A --name mom                        # 통화본(화자분리 후)
 ```
 
 > ⚠️ **권리 있는 클립만** — 본인 녹음 / 동의받은 성인 / CC0·라이선스 / 합성. 실존 인물 무단 음성 금지(README 상단 윤리·관할 법규).
