@@ -158,15 +158,24 @@ ref_text 를 이미 안다** — 전사 단계 생략(지연·오류 0), 텍스�
 RAG 회상(auto)·LoRA 배선·import/export·캐릭터 카드.
 
 **만들 것** (괄호=사용 트랙):
-1. ~~설문→페르소나 모듈~~ ✅ 구현됨 — `callone/llm/persona_survey.py` (①②)
-2. 키오스크 자동 플로우: 동의→설문→녹음→벨→통화→리셋 무인 루프 (①)
-3. 통화 시간제한+farewell 자동 트리거+부메랑 대사 주입 (①③)
+1. ~~설문→페르소나 모듈~~ ✅ — `callone/llm/persona_survey.py` (①②)
+2. ~~키오스크 자동 플로우~~ ✅ — `ui/src/components/KioskScreen.tsx`, 라우트 `/kiosk`:
+   대기→동의→설문 7문항→녹음 10s(레벨미터·카운트다운)→준비→벨(합성 벨소리, 3회 후 자동수신)
+   →통화(음성 전용·화면에 대화 미표시)→소멸→대기 무인 루프. 방치 90s 복귀, 장애 화면 8s 복귀.
+   통화 시간 조정: `localStorage.callone_kiosk_limit`(기본 110s) (①)
+3. ~~통화 시간제한+farewell 자동+부메랑 주입~~ ✅ — 잔여 0 에서 farewell(boomerang) 자동,
+   서버 `farewell` 가 `extra` 지시 수신. (겸사 수정: farewell 지시문이 record=False 없이
+   user 이벤트/이력에 새던 실제 버그 — `_run_turn(record=)` 배선) (①③)
 4. analyze 전사→memory_update 자동 배선 (②)
-5. 후크/벨 GPIO 연동(라즈베리파이→WS 제어) (전체)
-6. 소멸 카운터 API (①②)
+5. 후크/벨 GPIO 연동(라즈베리파이→WS 제어) — 키오스크 '받기' 버튼/자동수신을 후크 신호로 대체 (전체)
+6. ~~소멸 카운터 API~~ ✅ — `callone/serve/exhibit.py`, GET /api/exhibit/count ·
+   POST /api/exhibit/dissolve(오늘/누적, 날짜 넘어가면 today 리셋). 대기·소멸 화면에 표시 (①②)
 7. AI 인터뷰어 모드: AVP 변형 질문 스크립트로 callone이 인터뷰 진행 (③ 제작용)
 8. 파일 수신 핫스팟: 로컬 AP + QR 업로드 페이지 → /api/voice/analyze (②)
-9. 운영 안정화: 원버튼 기동, 장애 화면, 8h 내구 (전체)
+9. 운영 안정화: 원버튼 기동, 8h 내구 (전체)
+
+추가 API: POST /api/exhibit/persona (persona_from_survey 래핑 — 키오스크가 설문 답을 보내면
+카드+기억+부메랑 반환, 디스크 기록 0. 기억 시드는 카드 background 로 접어 세션 한정).
 
 **전시 UI 디자인 언어** ✅ 적용됨 (`ui/src`): 종이(#F4F0E6)·잉크(#221E16)·수화기 주홍(#B5402C)
 1색, 세리프 디스플레이+모노 상태표기, 서식형 셋업(밑줄 입력·단계 색인), 대본형 통화 기록,

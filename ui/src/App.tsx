@@ -5,6 +5,7 @@ import ContactList from "./components/ContactList";
 import CallScreen from "./components/CallScreen";
 import SpeakerCardEditor from "./components/SpeakerCardEditor";
 import ProcessingView from "./components/ProcessingView";
+import KioskScreen from "./components/KioskScreen";
 
 const GlobalStyle = createGlobalStyle`
   * { box-sizing: border-box; }
@@ -31,6 +32,7 @@ export default function App() {
           <Route path="/call/:id" element={<CallScreen />} />
           <Route path="/editor/:id" element={<SpeakerCardEditor />} />
           <Route path="/processing" element={<ProcessingView />} />
+          <Route path="/kiosk" element={<KioskScreen />} />   {/* 전시 무인 루프(EXHIBIT_PLAN §2) */}
         </Routes>
       </BrowserRouter>
     </ThemeProvider>

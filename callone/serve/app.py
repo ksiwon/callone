@@ -182,6 +182,30 @@ def create_app():
             return JSONResponse({"error": f"기억 추출 실패(llama-server 확인): {e}"},
                                 status_code=503)
 
+    # ----- 전시 모드(call:one 키오스크) ------------------------------------
+    @app.post("/api/exhibit/persona")
+    def exhibit_persona(payload: dict):
+        """설문 답 → 캐릭터 카드+기억 시드+부메랑(persona_from_survey 래핑 — 단일 진실원).
+        body: {name?, answers, mode?}. 순수 템플릿(LLM 불필요), 디스크 기록 0."""
+        from ..llm.persona_survey import persona_from_survey
+        try:
+            return persona_from_survey(payload.get("name") or "",
+                                       payload.get("answers") or {},
+                                       payload.get("mode") or "future_self")
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    @app.get("/api/exhibit/count")
+    def exhibit_count():
+        from .exhibit import current
+        return current()
+
+    @app.post("/api/exhibit/dissolve")
+    def exhibit_dissolve():
+        """세션 소멸 1회 집계(개인 데이터 0 — 숫자만)."""
+        from .exhibit import bump
+        return bump()
+
     @app.get("/api/speakers/{sid}/profile")
     def get_profile(sid: str):
         pj = _speakers_dir() / sid / "profile.json"
@@ -289,12 +313,13 @@ def create_app():
             return StreamingTranscriber(orch.asr, sr=16000, interval_ms=_partial_ms,
                                         on_partial=_send_partial)
 
-        async def _run_turn(audio, user_text=None):
-            """응답 생성(스레드) → 큐 → WS 송출. 이 코루틴은 **수신 안 함**(단일 수신자 규칙)."""
+        async def _run_turn(audio, user_text=None, record=True):
+            """응답 생성(스레드) → 큐 → WS 송출. 이 코루틴은 **수신 안 함**(단일 수신자 규칙).
+            record=False = 메타 턴(작별 지시 등): user 이벤트·이력에 안 남김."""
             q: asyncio.Queue = asyncio.Queue()
 
             def _producer():
-                for ev in orch.stream_turn(audio, sr=16000, user_text=user_text):
+                for ev in orch.stream_turn(audio, sr=16000, user_text=user_text, record=record):
                     loop.call_soon_threadsafe(q.put_nowait, ev)
                 loop.call_soon_threadsafe(q.put_nowait, ("_done", None))
 
@@ -366,12 +391,16 @@ def create_app():
                         # 안전한 끝맺음(연구 근거: 급작스러운 종료의 심리적 해악) — 클론이
                         # 짧은 작별 인사를 하고 클라가 재생 후 끊는다. 메타 턴(record=False):
                         # 지시문이 이력/자막에 사용자 발화로 남지 않음.
+                        # extra = 추가 연출 지시(전시 부메랑: persona_survey 의 boomerang 문자열).
                         await _finish_gen()
                         buf = []
                         fare = ("(사용자가 이제 통화를 끝내려고 한다. 지금까지의 대화 분위기에"
                                 " 맞춰 짧고 따뜻한 작별 인사를 한두 문장으로 해라.)")
+                        extra = str(ctrl.get("extra") or "").strip()[:300]
+                        if extra:
+                            fare += " " + extra
                         gen_task = asyncio.ensure_future(
-                            _run_turn(np.zeros(1, np.float32), user_text=fare))
+                            _run_turn(np.zeros(1, np.float32), user_text=fare, record=False))
                     elif t in ("interrupt", "stop"):
                         orch.interrupt()
                         if t == "stop":

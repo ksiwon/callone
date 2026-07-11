@@ -155,11 +155,13 @@ export class CallSocket {
       onFrame?: (jpegB64: string) => void;   // 토킹헤드 프레임
       onReady?: () => void;                  // session_init 완료
       onAudioEnd?: () => void;               // 한 턴 송출 완료 → A/V 동기 재생 트리거
+      onClose?: () => void;                  // WS 종료(정상 stop 포함 — 키오스크 장애 감지용)
     },
   ) {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     this.ws = new WebSocket(`${proto}://${location.host}${BASE}/ws/call/${speakerId}`);
     this.ws.binaryType = "arraybuffer";
+    this.ws.onclose = () => this.cb.onClose?.();
     this.ws.onmessage = (e) => {
       if (typeof e.data === "string") {
         const msg = JSON.parse(e.data);
@@ -193,8 +195,9 @@ export class CallSocket {
     try { this.ws.send(JSON.stringify({ type: "interrupt" })); } catch { /* noop */ }
   }
   // 안전한 끝맺음: 클론이 작별 인사 → 재생 후 클라가 끊음(급작스러운 종료의 심리적 해악 완화).
-  farewell() {
-    try { this.ws.send(JSON.stringify({ type: "farewell" })); } catch { /* noop */ }
+  // extra = 추가 연출 지시(전시 부메랑 — persona_from_survey 의 boomerang 문자열).
+  farewell(extra?: string) {
+    try { this.ws.send(JSON.stringify({ type: "farewell", extra })); } catch { /* noop */ }
   }
   stop() {
     try { this.ws.send(JSON.stringify({ type: "stop" })); } catch { /* noop */ }
@@ -213,6 +216,58 @@ export async function rememberCall(speakerId: string, history: Turn[]):
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || "기억 저장 실패");
   return j;
+}
+
+// ----- 전시 모드(call:one 키오스크) --------------------------------------
+// 설문 답 → 캐릭터 카드+기억 시드+부메랑(서버 persona_from_survey — 단일 진실원, 디스크 기록 0).
+export interface ExhibitPersona {
+  card: Record<string, string>;   // SessionInit 캐릭터 카드 필드와 1:1
+  memories: string[];
+  boomerang?: string;             // 작별 직전 되돌려줄 지시문 → farewell(extra)
+}
+export async function exhibitPersona(
+  name: string, answers: Record<string, unknown>, mode: "future_self" | "loved_one" = "future_self",
+): Promise<ExhibitPersona> {
+  const r = await fetch(`${BASE}/api/exhibit/persona`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, answers, mode }),
+  });
+  if (!r.ok) throw new Error("페르소나 생성 실패");
+  return r.json();
+}
+
+// 소멸 카운터(개인 데이터 0 — 숫자만). 벽면 "오늘 N개의 목소리가 태어나고 사라졌습니다".
+export interface ExhibitCount { day: string; today: number; total: number }
+export async function exhibitCount(): Promise<ExhibitCount> {
+  const r = await fetch(`${BASE}/api/exhibit/count`);
+  if (!r.ok) return { day: "", today: 0, total: 0 };
+  return r.json();
+}
+export async function exhibitDissolve(): Promise<ExhibitCount> {
+  const r = await fetch(`${BASE}/api/exhibit/dissolve`, { method: "POST" });
+  if (!r.ok) return { day: "", today: 0, total: 0 };
+  return r.json();
+}
+
+// 마이크 Float32 PCM → 16bit WAV base64 — 키오스크 현장 녹음을 ref_audio_b64 로 보내는 용도.
+export function pcmToWavB64(pcm: Float32Array, sr: number): string {
+  const buf = new ArrayBuffer(44 + pcm.length * 2);
+  const v = new DataView(buf);
+  const str = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + pcm.length * 2, true); str(8, "WAVE");
+  str(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) {
+    const s = Math.max(-1, Math.min(1, pcm[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
 }
 
 // 파일 → base64(데이터URL 접두 제거). 음성/사진 전송용.
