@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { useParams, useNavigate } from "react-router-dom";
-import { CallSocket, fileToBase64, previewVoice, listVoicePresets, analyzeVoiceStart, analyzeVoiceStatus, analyzeVoiceSave, rememberCall, type Turn, type SessionInit, type VoicePreset, type AnalyzeStatus } from "../api/calloneClient";
+import { CallSocket, fileToBase64, previewVoice, listVoicePresets, analyzeVoiceStart, analyzeVoiceStatus, analyzeVoiceSave, analyzeVoiceRemember, listVoiceJobs, exhibitInterviewer, rememberCall, type Turn, type SessionInit, type VoicePreset, type AnalyzeStatus } from "../api/calloneClient";
 import Wordmark from "./Wordmark";
 
 /* ── 셋업(서식) ── */
@@ -394,6 +394,32 @@ export default function CallScreen() {
     finally { setAnaBusy(false); }
   }
 
+  // 트랙②: 방금 분석한 통화 내용 → 그 사람 기억 자동 구축(전사+LLM, memories.json).
+  async function rememberAnalyzed() {
+    if (!anaJob || !anaSpeaker || !presetId || anaBusy) return;
+    setAnaBusy(true); setAnaMsg("통화 내용을 기억으로 옮기는 중 — 몇 분 걸릴 수 있어요…");
+    try {
+      const r = await analyzeVoiceRemember(anaJob, anaSpeaker, presetId);
+      setAnaMsg(r.added
+        ? `기억 ${r.added}개 구축 (총 ${r.total}) — '${presetId}' 이름으로 통화하면 회상해요.`
+        : "기억할 만한 내용을 못 찾았어요 (전사 창 " + r.windows + "개)");
+    } catch (e: any) { setAnaMsg(`! ${e?.message || "기억 구축 실패"}`); }
+    finally { setAnaBusy(false); }
+  }
+
+  // 폰 업로드(/upload) 이어받기 — 가장 최근 job 을 가져온다(전시 접수 데스크 플로우).
+  async function pickUploadedJob() {
+    setAnaMsg("업로드된 파일을 찾는 중…");
+    try {
+      const jobs = await listVoiceJobs();
+      const j = jobs.find((x) => x.stage !== "error");
+      if (!j) { setAnaMsg("! 업로드된 파일이 없어요 — 폰에서 /upload 로 보내주세요."); return; }
+      setAnaStatus(null); setAnaSpeaker("");
+      setAnaJob(j.job_id);
+      setAnaMsg(`업로드 이어받음 (코드 ${j.job_id.slice(0, 6).toUpperCase()})`);
+    } catch (e: any) { setAnaMsg(`! ${e?.message || "job 조회 실패"}`); }
+  }
+
   // 목소리 준비됨? (다음/시작 버튼 활성 조건) — 업로드했거나 프리셋 골랐거나.
   // own/call 플로우는 목소리 주인 동의 체크(윤리 게이트)까지 요구. 프리셋은 등록 시 확인됨.
   const hasVoice = (voiceSource === "own" ? !!voiceFile : !!presetId)
@@ -754,6 +780,11 @@ export default function CallScreen() {
                 <input type="file" accept="audio/*"
                   onChange={(e) => startAnalyze(e.target.files?.[0] ?? null)} />
               </FileBox>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <Note style={{ flex: 1 }}>폰에 파일이 있다면 — 같은 네트워크에서
+                  <b> {location.origin}/upload </b>로 보내고,</Note>
+                <Btn onClick={pickUploadedJob} disabled={anaBusy}>업로드 이어받기</Btn>
+              </div>
               {anaJob && anaStatus?.stage !== "done" && anaStatus?.stage !== "error" && (
                 <Note>{anaStatus?.stage === "diarize" ? "화자 분리 중 — 긴 녹음은 몇 분 걸려요"
                   : anaStatus?.stage === "scoring" ? "좋은 구간 고르는 중…"
@@ -797,6 +828,14 @@ export default function CallScreen() {
             </>)}
 
             {voiceSource === "preset" && (<>
+              {anaJob && anaSpeaker && presetId && (
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <Note style={{ flex: 1 }}>방금 분석한 통화의 내용을 '{presetId}'의 기억으로
+                    만들 수 있어요 — 다음 통화부터 회상해요.</Note>
+                  <Btn onClick={rememberAnalyzed} disabled={anaBusy}>
+                    {anaBusy ? "기억 구축 중…" : "통화 내용 기억시키기"}</Btn>
+                </div>
+              )}
               <label>등록된 목소리 선택</label>
               {presets.length ? (
                 <select value={presetId} onChange={(e) => setPresetId(e.target.value)}
@@ -828,6 +867,18 @@ export default function CallScreen() {
               {PRESETS.map((p) => (
                 <Chip key={p.label} type="button" onClick={() => applyPreset(p.card)}>{p.label}</Chip>
               ))}
+              <Chip type="button" title="트랙③ 제작용 — AVP 변형 질문지로 callone 이 인터뷰를 진행"
+                onClick={async () => {
+                  try {
+                    const r = await exhibitInterviewer(userPersona || "");
+                    applyPreset({
+                      persona: r.card.persona || "", userPersona: r.card.user_persona || "",
+                      personality: r.card.personality || "", background: r.card.background || "",
+                      situation: r.card.situation || "", firstMessage: r.card.first_message || "",
+                      exampleDialogue: "",
+                    });
+                  } catch { /* 서버 미기동 시 무시 */ }
+                }}>인터뷰어 (제작)</Chip>
             </PresetRow>
             <label>이름·관계 (이 사람은 누구?)</label>
             <input type="text" value={persona} onChange={(e) => setPersona(e.target.value)} placeholder="예: 소꿉친구 나은" />

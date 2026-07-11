@@ -4,7 +4,7 @@
 // 운영: /kiosk 로 진입. 통화 시간(초)은 localStorage.callone_kiosk_limit 로 조정(기본 110).
 import { useEffect, useRef, useState } from "react";
 import styled, { css, keyframes } from "styled-components";
-import { CallSocket, exhibitPersona, exhibitCount, exhibitDissolve, pcmToWavB64, type ExhibitCount } from "../api/calloneClient";
+import { CallSocket, ExhibitEvents, exhibitEvent, exhibitPersona, exhibitCount, exhibitDissolve, pcmToWavB64, type ExhibitCount } from "../api/calloneClient";
 import Wordmark from "./Wordmark";
 
 /* ── 스타일: 전시 언어(종이·잉크·주홍) 그대로, 관람 거리용 큰 활자 ── */
@@ -135,6 +135,7 @@ export default function KioskScreen() {
     sockRef.current = null;
     micStopRef.current(); micStopRef.current = () => {};
     ringStopRef.current(); ringStopRef.current = () => {};
+    void exhibitEvent("ring_stop");                       // 물리 벨이 남아 울리는 것 방지
     try { playCtxRef.current?.close(); } catch { /* noop */ }
     try { ringCtxRef.current?.close(); } catch { /* noop */ }
     playCtxRef.current = null; ringCtxRef.current = null;
@@ -150,6 +151,22 @@ export default function KioskScreen() {
   useEffect(() => {
     if (phase === "attract") exhibitCount().then(setCount).catch(() => setCount(null));
   }, [phase]);
+
+  /* ── 물리 전화기(GPIO 브리지) 이벤트: 후크 = 진짜 통제권 ── */
+  useEffect(() => {
+    const ev = new ExhibitEvents((e) => {
+      const p = phaseRef.current;
+      if (e === "hook_up") {
+        if (p === "ring") answer();                       // 수화기 들면 통화 시작
+        else if (p === "record") startRecording();        // 녹음 단계에선 들면 녹음 시작
+      } else if (e === "hook_down") {
+        if (p === "call") dissolve();                     // 통화 중 내려놓음 = 즉시 소멸
+        else if (p === "prepare" || p === "ring") resetAll();
+      }
+    });
+    return () => ev.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ── 방치 감시: 동의/설문에서 IDLE_S 무입력 → 대기 복귀 ── */
   useEffect(() => {
@@ -234,6 +251,7 @@ export default function KioskScreen() {
 
   /* ── 벨: 440+480Hz, 1초 울림/2초 쉼 — MAX_RINGS 후 자동 수신 ── */
   function startRing() {
+    void exhibitEvent("ring_start");                      // GPIO 브리지 → 물리 벨(솔레노이드)
     const ctx = new AudioContext();
     ringCtxRef.current = ctx;
     const gain = ctx.createGain(); gain.gain.value = 0; gain.connect(ctx.destination);
@@ -254,6 +272,7 @@ export default function KioskScreen() {
 
   /* ── 수신 → 통화 ── */
   async function answer() {
+    void exhibitEvent("ring_stop");                       // 물리 벨 정지
     ringStopRef.current(); ringStopRef.current = () => {};
     setRemain(limitS());
     startedAtRef.current = Date.now();

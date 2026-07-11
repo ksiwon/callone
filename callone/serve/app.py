@@ -37,6 +37,47 @@ except Exception:  # noqa: BLE001
     FastAPI = None  # type: ignore
 
 
+# 폰 업로드 페이지(전시 트랙②) — 외부 리소스 0(오프라인 AP 에서도 동작), call:one 디자인 언어.
+# 파일 → POST /api/voice/analyze → job 코드 표시 → 접수 데스크가 /api/voice/jobs 로 이어받음.
+_UPLOAD_HTML = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>call:one — 파일 보내기</title><style>
+body{margin:0;background:#F4F0E6;color:#221E16;font-family:'Pretendard','Apple SD Gothic Neo',
+'Malgun Gothic',system-ui,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center}
+main{max-width:420px;padding:36px 26px;text-align:center}
+h1{font-family:'Noto Serif KR','NanumMyeongjo',Batang,serif;font-weight:600;font-size:26px;margin:0 0 6px}
+h1 b{color:#B5402C;font-weight:600}
+p{color:#776F5E;font-size:14px;line-height:1.75;margin:10px 0}
+label{display:block;border:1px dashed #776F5E;padding:22px 14px;margin:22px 0;cursor:pointer;font-size:14px;color:#776F5E}
+input{display:none}
+#st{font-family:'IBM Plex Mono',Consolas,monospace;font-size:13px;letter-spacing:.08em;color:#776F5E;min-height:20px}
+#code{font-family:'IBM Plex Mono',Consolas,monospace;font-size:34px;letter-spacing:.2em;color:#B5402C;margin:8px 0}
+hr{border:none;border-top:1px solid #CBC3B0;margin:24px 0}
+small{font-family:'IBM Plex Mono',Consolas,monospace;font-size:11px;color:#776F5E;line-height:1.8}
+</style></head><body><main>
+<h1>call<b>:</b>one</h1>
+<p>소중한 사람과의 통화 녹음 한 통을 보내주세요.<br>m4a · mp3 · wav — 몇 시간짜리도 괜찮아요.</p>
+<label id="box">파일 선택<input type="file" accept="audio/*" id="f"></label>
+<div id="st"></div><div id="code"></div>
+<hr><small>이 파일은 이 방을 떠나지 않습니다.<br>분석이 끝나는 즉시 원본은 삭제됩니다.</small>
+<script>
+const f=document.getElementById('f'),st=document.getElementById('st'),
+box=document.getElementById('box'),code=document.getElementById('code');
+const S={loading:'받는 중',diarize:'목소리를 찾는 중',scoring:'좋은 구간 고르는 중',
+done:'완료 — 접수 데스크에 이 코드를 보여주세요',error:'실패 — 데스크에 문의해주세요'};
+f.onchange=async()=>{const file=f.files[0];if(!file)return;
+box.textContent=file.name;st.textContent='보내는 중…';
+const ext=(file.name.split('.').pop()||'m4a').toLowerCase();
+try{const r=await fetch('/api/voice/analyze?ext='+ext,{method:'POST',body:file});
+const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);
+const jid=j.job_id;code.textContent=jid.slice(0,6).toUpperCase();
+const t=setInterval(async()=>{try{const s=await(await fetch('/api/voice/analyze/'+jid)).json();
+st.textContent=S[s.stage]||s.stage;if(s.stage==='done'||s.stage==='error')clearInterval(t);
+}catch(e){st.textContent=S.error;clearInterval(t)}},2000);
+}catch(e){st.textContent='실패: '+e.message}};
+</script></main></body></html>"""
+
+
 def _speakers_dir() -> Path:
     return data_dir() / "speakers"
 
@@ -160,6 +201,52 @@ def create_app():
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
 
+    @app.post("/api/voice/analyze/{job_id}/remember")
+    async def voice_analyze_remember(job_id: str, payload: dict):
+        """분석 job 의 통화 내용 → 선택 화자의 기억 자동 구축 (전시 트랙②).
+        body: {speaker_id, name}. 분석 중 확보한 오디오 창을 전사(ASR)하고
+        LLM 으로 사실 추출 → data/speakers/<name>/memories.json. ASR·LLM 필요."""
+        import asyncio
+
+        from .voice_analyze import remember_pick
+
+        def _work():
+            asr = _analyze_asr.get("asr")
+            if asr is None:
+                try:
+                    from .asr_stream import StreamASR
+
+                    asr = StreamASR(load_config("serve").get("asr", {}))
+                except Exception:  # noqa: BLE001
+                    asr = None
+                _analyze_asr["asr"] = asr
+            base_url = (load_config("serve").get("llm") or {}).get(
+                "base_url", "http://127.0.0.1:8090")
+            return remember_pick(job_id, str(payload.get("speaker_id", "")),
+                                 str(payload.get("name", "")), asr=asr, base_url=base_url)
+
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(None, _work)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"기억 구축 실패(ASR/llama-server 확인): {e}"},
+                                status_code=503)
+
+    @app.get("/api/voice/jobs")
+    def voice_jobs():
+        """최근 분석 job 목록(메타만 — 내용 0). 폰 업로드(/upload)를 데스크가 이어받는 용도."""
+        from .voice_analyze import list_jobs
+        return list_jobs()
+
+    @app.get("/upload")
+    def upload_page():
+        """폰 업로드 페이지(전시 트랙② — 로컬 Wi-Fi AP + QR 의 목적지).
+        외부 리소스 0(오프라인), 원 파일은 분석 후 즉시 삭제. EXHIBIT_PLAN §3."""
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(_UPLOAD_HTML)
+
     @app.post("/api/speakers/{sid}/remember")
     async def remember(sid: str, payload: dict):
         """통화 이력 → 기억 성장(유저 주도 영속화). body: {history:[{role,content}]}
@@ -205,6 +292,46 @@ def create_app():
         """세션 소멸 1회 집계(개인 데이터 0 — 숫자만)."""
         from .exhibit import bump
         return bump()
+
+    @app.get("/api/exhibit/interviewer")
+    def exhibit_interviewer(name: str = ""):
+        """AI 인터뷰어 카드(트랙③ 제작) — 통화 셋업에 그대로 적용할 캐릭터 카드 + 질문지."""
+        from ..llm.interviewer import QUESTIONS, interviewer_card
+        return {"card": interviewer_card(name), "questions": QUESTIONS}
+
+    # 전시 이벤트 버스 — 물리 전화기(GPIO 브리지) ↔ 키오스크 브라우저.
+    # 브리지: 후크 스위치 → POST hook_up/hook_down. 키오스크: ring_start/ring_stop → 브리지가 벨 구동.
+    _exhibit_subs: list[WebSocket] = []
+
+    @app.websocket("/ws/exhibit/events")
+    async def exhibit_events(ws: WebSocket):
+        await ws.accept()
+        _exhibit_subs.append(ws)
+        try:
+            while True:
+                await ws.receive_text()          # 구독 전용(수신 무시 — keepalive 허용)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            if ws in _exhibit_subs:
+                _exhibit_subs.remove(ws)
+
+    @app.post("/api/exhibit/event")
+    async def exhibit_event(payload: dict):
+        """이벤트 브로드캐스트. body: {event: hook_up|hook_down|ring_start|ring_stop}"""
+        ev = str(payload.get("event") or "").strip()
+        if ev not in ("hook_up", "hook_down", "ring_start", "ring_stop"):
+            return JSONResponse({"error": f"unknown event: {ev}"}, status_code=400)
+        msg = json.dumps({"type": "event", "event": ev})
+        delivered = 0
+        for ws in list(_exhibit_subs):
+            try:
+                await ws.send_text(msg)
+                delivered += 1
+            except Exception:  # noqa: BLE001
+                if ws in _exhibit_subs:
+                    _exhibit_subs.remove(ws)
+        return {"delivered": delivered}
 
     @app.get("/api/speakers/{sid}/profile")
     def get_profile(sid: str):

@@ -166,16 +166,31 @@ RAG 회상(auto)·LoRA 배선·import/export·캐릭터 카드.
 3. ~~통화 시간제한+farewell 자동+부메랑 주입~~ ✅ — 잔여 0 에서 farewell(boomerang) 자동,
    서버 `farewell` 가 `extra` 지시 수신. (겸사 수정: farewell 지시문이 record=False 없이
    user 이벤트/이력에 새던 실제 버그 — `_run_turn(record=)` 배선) (①③)
-4. analyze 전사→memory_update 자동 배선 (②)
-5. 후크/벨 GPIO 연동(라즈베리파이→WS 제어) — 키오스크 '받기' 버튼/자동수신을 후크 신호로 대체 (전체)
+4. ~~analyze 전사→기억 자동 배선~~ ✅ — 분석 중 시간순 오디오 창(≤10분)을 RAM 확보(`_memo`,
+   원본 삭제 전에) → `remember_pick`: 전사 후 선택 화자=상대/나머지=사용자로 재구성 →
+   remember_from_history 재사용 → memories.json. POST /api/voice/analyze/{jid}/remember,
+   UI '통화 내용 기억시키기' 버튼 (②)
+5. ~~후크/벨 GPIO 연동~~ ✅(소프트웨어측) — 이벤트 버스: POST /api/exhibit/event +
+   WS /ws/exhibit/events 브로드캐스트. 키오스크가 구독(hook_up=수신/녹음시작,
+   hook_down=통화 중 즉시 소멸)·발신(ring_start/stop). 브리지 `scripts/exhibit_gpio_bridge.py`
+   (gpiozero 후크 입력→POST, 벨 릴레이←WS 구독, 하드웨어 없으면 키보드 시뮬 u/d) — 실배선만 남음 (전체)
 6. ~~소멸 카운터 API~~ ✅ — `callone/serve/exhibit.py`, GET /api/exhibit/count ·
    POST /api/exhibit/dissolve(오늘/누적, 날짜 넘어가면 today 리셋). 대기·소멸 화면에 표시 (①②)
-7. AI 인터뷰어 모드: AVP 변형 질문 스크립트로 callone이 인터뷰 진행 (③ 제작용)
-8. 파일 수신 핫스팟: 로컬 AP + QR 업로드 페이지 → /api/voice/analyze (②)
-9. 운영 안정화: 원버튼 기동, 8h 내구 (전체)
+7. ~~AI 인터뷰어 모드~~ ✅ — `callone/llm/interviewer.py`: AVP 변형 18문항이 카드(situation)에
+   내장, 한 턴 한 질문+후속 1~2개 규칙. GET /api/exhibit/interviewer, 통화 셋업
+   '인터뷰어(제작)' 칩으로 원클릭 적용 (③ 제작용)
+8. ~~파일 수신 핫스팟~~ ✅(페이지측) — GET /upload: 외부 리소스 0 업로드 페이지
+   ("이 파일은 이 방을 떠나지 않습니다") → /api/voice/analyze → 6자리 코드 표시,
+   데스크는 GET /api/voice/jobs + '업로드 이어받기' 버튼으로 인수 — AP 라우터 설정만 남음 (②)
+9. 운영 안정화 — `scripts/run_exhibit.sh` 원버튼(기동+주소 출력) ✅, 8h 내구는 현장 테스트 항목 (전체)
 
 추가 API: POST /api/exhibit/persona (persona_from_survey 래핑 — 키오스크가 설문 답을 보내면
 카드+기억+부메랑 반환, 디스크 기록 0. 기억 시드는 카드 background 로 접어 세션 한정).
+
+**시뮬레이션 ✅** (`tests/test_exhibit_flow.py`, 실모델 없이 API 전 구간): 키오스크 여정
+(설문→페르소나→WS 통화→턴→farewell+부메랑→소멸 카운터), 트랙②(업로드→job 인수→기억 구축→
+memories.json), 이벤트 버스, 업로드 페이지, 인터뷰어. 하드웨어 남은 것 = GPU 박스 실통화 리허설,
+전화기 개조, AP 라우터.
 
 **전시 UI 디자인 언어** ✅ 적용됨 (`ui/src`): 종이(#F4F0E6)·잉크(#221E16)·수화기 주홍(#B5402C)
 1색, 세리프 디스플레이+모노 상태표기, 서식형 셋업(밑줄 입력·단계 색인), 대본형 통화 기록,

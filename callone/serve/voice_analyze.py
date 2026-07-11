@@ -33,6 +33,10 @@ MIN_S, MAX_S = 6.0, 12.0     # ref 클립 길이 범위(ref_clip_score 와 합�
 SAMPLE_S = 4.0               # "누가 그 사람?" 청취 샘플 길이
 TOP_CLIPS = 5                # 화자별 보관 후보 수
 JOB_TTL_S = 3600
+# 기억 추출용 오디오 창(원본은 분석 후 삭제되므로 분석 중에 잡아둠 — 시간순, 두 화자 모두).
+# 10분 × 16k float32 ≈ 38MB RAM/job — 전시(잡 1개씩)에서 무리 없음.
+MEMO_MAX_S = 600.0           # 전사 대상 총량 상한
+MEMO_SEG_S = 30.0            # 창 하나 최대 길이(ASR 안정)
 
 _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
@@ -127,6 +131,23 @@ def _analyze(job: dict, path: str) -> None:
             })
         if not result:
             raise RuntimeError("쓸만한 구간을 못 찾음 — 녹음이 너무 짧거나 잡음이 큼")
+
+        # 기억 추출용 창: 시간순으로 두 화자 모두, 총 MEMO_MAX_S 까지(원본 삭제 전에 확보).
+        memo, memo_total = [], 0.0
+        for seg in segs:
+            if memo_total >= MEMO_MAX_S:
+                break
+            if getattr(seg, "overlap", False):
+                continue
+            e = min(seg.end, seg.start + MEMO_SEG_S, seg.start + (MEMO_MAX_S - memo_total))
+            if e - seg.start < 1.0:
+                continue
+            memo.append({"speaker": seg.local_speaker, "start": float(seg.start),
+                         "audio": y[int(seg.start * sr): int(e * sr)].copy()})
+            memo_total += e - seg.start
+        job["_memo"] = memo
+        job["_memo_sr"] = sr
+
         job["speakers"] = result
         job["dummy_diarizer"] = dummy
         job["stage"] = "done"
@@ -173,6 +194,52 @@ def job_status(jid: str) -> dict | None:
     return out
 
 
+def _safe_name(name: str) -> str:
+    return "".join(ch for ch in name if ch.isalnum() or ch in "-_가-힣") or "voice"
+
+
+def list_jobs() -> list[dict]:
+    """최근 job 목록(내용 무관 메타만) — 폰 업로드(/upload) 를 데스크 UI 가 이어받는 용도."""
+    _cleanup_expired()
+    now = time.time()
+    with _lock:
+        items = sorted(_jobs.items(), key=lambda kv: -kv[1]["t0"])[:10]
+    return [{"job_id": jid, "stage": j["stage"], "age_s": round(now - j["t0"], 1)}
+            for jid, j in items]
+
+
+def remember_pick(jid: str, speaker_id: str, name: str, asr, base_url: str,
+                  chat_fn=None) -> dict:
+    """분석 job 의 통화 내용 → 프리셋 화자의 기억(memories.json) 자동 구축 (트랙②).
+
+    분석 중 확보해 둔 시간순 오디오 창(_memo)을 전사해 '그 사람'(selected)=assistant,
+    나머지 화자=user 로 이력을 재구성 → remember_from_history 재사용(같은 프롬프트·중복제거).
+    asr: transcribe(audio, sr)->str 계약. chat_fn 은 테스트 주입용."""
+    job = _jobs.get(jid)
+    if job is None or job.get("stage") != "done":
+        raise ValueError("job 없음/미완료")
+    memo = job.get("_memo") or []
+    if not memo or asr is None:
+        return {"added": 0, "total": 0, "windows": 0}
+    sr = job.get("_memo_sr", 16000)
+    history = []
+    for w in memo:
+        try:
+            text = (asr.transcribe(w["audio"], sr) or "").strip()
+        except Exception as e:  # noqa: BLE001
+            log.warning("기억 전사 실패(창 %.1fs~): %s", w["start"], e)
+            continue
+        if text:
+            role = "assistant" if w["speaker"] == speaker_id else "user"
+            history.append({"role": role, "content": text})
+    if not history:
+        return {"added": 0, "total": 0, "windows": 0}
+    from ..llm.memory_update import remember_from_history
+
+    r = remember_from_history(_safe_name(name), history, base_url, chat_fn=chat_fn)
+    return {**r, "windows": len(history)}
+
+
 def save_pick(jid: str, speaker_id: str, name: str, asr=None) -> dict:
     """선택한 화자의 best 클립 → data/voice_presets/<name>.wav (+ 전사 .txt).
     asr: transcribe(audio, sr)->str 계약(선택) — 있으면 ref_text 도 저장(유사도↑)."""
@@ -182,7 +249,7 @@ def save_pick(jid: str, speaker_id: str, name: str, asr=None) -> dict:
     spk = next((s for s in job["speakers"] if s["id"] == speaker_id), None)
     if spk is None:
         raise ValueError(f"화자 없음: {speaker_id}")
-    safe = "".join(ch for ch in name if ch.isalnum() or ch in "-_가-힣") or "voice"
+    safe = _safe_name(name)
     d = preset_dir()
     d.mkdir(parents=True, exist_ok=True)
     best = spk["_clips"][0]

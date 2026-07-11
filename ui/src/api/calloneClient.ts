@@ -139,6 +139,23 @@ export async function analyzeVoiceSave(jobId: string, speakerId: string, name: s
   if (!r.ok) throw new Error(j.error || "프리셋 저장 실패");
   return j;
 }
+// 분석 job 의 통화 내용 → 그 사람 기억 자동 구축(트랙② — 전사+LLM 추출, memories.json).
+export async function analyzeVoiceRemember(jobId: string, speakerId: string, name: string):
+  Promise<{ added: number; total: number; windows: number }> {
+  const r = await fetch(`${BASE}/api/voice/analyze/${jobId}/remember`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ speaker_id: speakerId, name }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "기억 구축 실패");
+  return j;
+}
+// 최근 분석 job 목록(메타만) — 폰 업로드(/upload)를 데스크 UI 가 이어받는 용도.
+export interface VoiceJob { job_id: string; stage: string; age_s: number }
+export async function listVoiceJobs(): Promise<VoiceJob[]> {
+  const r = await fetch(`${BASE}/api/voice/jobs`);
+  return r.ok ? r.json() : [];
+}
 
 // 실시간 통화 WebSocket. 마이크 오디오(Float32) 업스트림, 음성 청크 다운스트림.
 export class CallSocket {
@@ -247,6 +264,42 @@ export async function exhibitDissolve(): Promise<ExhibitCount> {
   const r = await fetch(`${BASE}/api/exhibit/dissolve`, { method: "POST" });
   if (!r.ok) return { day: "", today: 0, total: 0 };
   return r.json();
+}
+
+// AI 인터뷰어 카드(트랙③ 제작) — 통화 셋업에 적용할 캐릭터 카드 + AVP 변형 질문지.
+export async function exhibitInterviewer(name = ""):
+  Promise<{ card: Record<string, string>; questions: string[] }> {
+  const r = await fetch(`${BASE}/api/exhibit/interviewer?name=${encodeURIComponent(name)}`);
+  if (!r.ok) throw new Error("인터뷰어 카드 로드 실패");
+  return r.json();
+}
+
+// 전시 이벤트 버스 — 물리 전화기(GPIO 브리지) ↔ 키오스크.
+export async function exhibitEvent(event: "hook_up" | "hook_down" | "ring_start" | "ring_stop") {
+  try {
+    await fetch(`${BASE}/api/exhibit/event`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event }),
+    });
+  } catch { /* 연출용 — 실패 무해 */ }
+}
+export class ExhibitEvents {
+  private ws: WebSocket | null = null;
+  private closed = false;
+  constructor(private onEvent: (ev: string) => void) { this.connect(); }
+  private connect() {
+    if (this.closed) return;
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    this.ws = new WebSocket(`${proto}://${location.host}${BASE}/ws/exhibit/events`);
+    this.ws.onmessage = (e) => {
+      try {
+        const m = JSON.parse(e.data);
+        if (m.type === "event") this.onEvent(m.event);
+      } catch { /* noop */ }
+    };
+    this.ws.onclose = () => { if (!this.closed) setTimeout(() => this.connect(), 3000); };
+  }
+  close() { this.closed = true; try { this.ws?.close(); } catch { /* noop */ } }
 }
 
 // 마이크 Float32 PCM → 16bit WAV base64 — 키오스크 현장 녹음을 ref_audio_b64 로 보내는 용도.
