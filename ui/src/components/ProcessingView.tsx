@@ -51,10 +51,10 @@ const Back = styled(Link)`
 const STAGES: [string, string][] = [
   ["적재·정규화", "녹음(m4a/mp3/wav) → 16k 모노 wav + 메타. 잡음·무음 정리."],
   ["화자 분리·정제", "2화자 분리 + 동일화자 통합 + 제3자/배경 제거(본인 음성만 남김)."],
-  ["전사·데이터셋", "faster-whisper 한국어 전사(사투리 보존) → TTS·대화 학습셋 + PII 마스킹."],
+  ["전사·데이터셋", "whisper 한국어 전사(사투리 보존) → TTS·대화 학습셋 + PII 마스킹."],
   ["음성 학습(풀튜닝)", "대량 발화로 화자 전용 TTS 학습 → 제로샷보다 음색·운율 충실. 결과는 data/speakers/{id}."],
-  ["페르소나·기억", "EXAONE 캐릭터 카드 + (선택) RAG/기억 추출로 말투·사실 일관성 강화."],
-  ["실시간 통화", "VAD → 전사 → EXAONE → CosyVoice3 스트리밍 → Ditto 아바타. (= 통화 화면)"],
+  ["페르소나·기억", "LLM 캐릭터 카드 + (선택) RAG/기억 추출로 말투·사실 일관성 강화."],
+  ["실시간 통화", "VAD → Qwen3-ASR 스트리밍 전사 → EXAONE → CosyVoice3 스트리밍 → Ditto. (= 통화 화면)"],
 ];
 
 export default function ProcessingView() {
@@ -69,12 +69,12 @@ export default function ProcessingView() {
       </Lead>
       <Rule strong />
 
-      <SecLabel>현재 스택</SecLabel>
+      <SecLabel>현재 스택 (v2 — 티어 자동 선택)</SecLabel>
       <div>
-        <Tag>LLM · EXAONE-3.5-7.8B</Tag>
-        <Tag>TTS · CosyVoice3-0.5B</Tag>
+        <Tag>LLM · EXAONE 3.5-7.8B / 4.0-32B (Qwen3 옵션)</Tag>
+        <Tag>TTS · CosyVoice3 (Qwen3-TTS 게이트 대기)</Tag>
+        <Tag>ASR · Qwen3-ASR 스트리밍 + whisper 폴백</Tag>
         <Tag>아바타 · Ditto</Tag>
-        <Tag>ASR · faster-whisper</Tag>
       </div>
       <Rule />
 
