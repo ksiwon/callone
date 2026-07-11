@@ -17,5 +17,4 @@ callone-llm-sft     --speakers A B
 
 echo "[callone] 전량 데이터셋 완료. 화자별 학습:"
 echo "  callone-asr-train"
-echo "  bash scripts/setup_piper_gpu.sh   # 목소리 학습(Piper)"
-echo "  callone-llm-train  --config llm_server --speakers A B"
+echo "  callone-llm-train  --config llm_server --speakers A B   # 말투 LoRA(목소리는 제로샷)"

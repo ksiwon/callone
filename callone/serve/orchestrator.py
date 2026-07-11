@@ -41,6 +41,28 @@ class Turn:
     timings: dict = field(default_factory=dict)
 
 
+def _pick_asr(serve_cfg: dict):
+    """ASR 백엔드 선택: qwen3(한국어 52언어, 티어 high/ultra 기본) → faster-whisper 폴백.
+    serve.yaml asr.backend: auto(티어 기본) | qwen3 | whisper."""
+    asr_cfg = (serve_cfg or {}).get("asr", {}) or {}
+    backend = str(asr_cfg.get("backend", "auto"))
+    if backend == "auto":
+        try:
+            from ..common.hardware import detect_tier, tier_defaults
+
+            backend = tier_defaults(detect_tier())["asr_backend"]
+        except Exception:  # noqa: BLE001
+            backend = "whisper"
+    if backend == "qwen3":
+        try:
+            from .asr_qwen3 import Qwen3StreamASR
+
+            return Qwen3StreamASR(asr_cfg)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Qwen3-ASR 불가(%s) — faster-whisper 폴백", e)
+    return StreamASR(asr_cfg)
+
+
 def _pick_llm(speaker: str, serve_cfg: dict):
     """LLM 백엔드 선택 (우선순위):
       1) llama-server(HTTP) — Qwen3.5-4B+LoRA (qwen3_5 는 OV 변환 불가 → llama.cpp).
@@ -51,9 +73,15 @@ def _pick_llm(speaker: str, serve_cfg: dict):
     llm_cfg = (serve_cfg or {}).get("llm", {})
     backend = llm_cfg.get("backend", "auto")
     base_url = llm_cfg.get("base_url", "http://127.0.0.1:8080")
-    # LoRA 가 화자 A 말투·습관을 이미 내재화 → 일상 대화엔 RAG OFF 가 더 자연스럽다
-    # (RAG 키워드 발화 주입이 삼천포 유발). 온도 0.5 로 산만함 억제. 둘 다 serve.yaml 로 조정.
-    use_rag = bool(llm_cfg.get("use_rag", False))
+    # RAG: auto = 화자 기억 데이터(memories.json/utterances.json) 있으면 켬, 없으면 끔.
+    # (키워드 발화 주입의 삼천포는 rag.py 게이트(rag_min_score)가 억제. serve.yaml 로 조정.)
+    use_rag = llm_cfg.get("use_rag", False)
+    if isinstance(use_rag, str) and use_rag.lower() == "auto":
+        from ..common.io import data_dir
+
+        _sd = data_dir() / "speakers" / speaker
+        use_rag = (_sd / "memories.json").exists() or (_sd / "utterances.json").exists()
+    use_rag = bool(use_rag)
     temperature = float(llm_cfg.get("temperature", 0.5))
     max_new = int(llm_cfg.get("max_new_tokens", 80))
 
@@ -92,24 +120,34 @@ def _pick_llm(speaker: str, serve_cfg: dict):
 
 
 def _pick_tts(speaker: str, serve_cfg: dict):
+    """TTS 백엔드 체인: qwen3tts(:8093) → cosyvoice3(:8092) → piper → kokoro.
+    backend=auto 는 qwen3tts 우선(서버 떠있을 때만), 기본값은 cosyvoice3(음색 게이트 통과 전 — REBUILD_PLAN §1)."""
     tts_cfg = (serve_cfg or {}).get("tts", {})
     backend = tts_cfg.get("backend", "cosyvoice3")
-    # 0) CosyVoice3(별 프로세스 :8092, 제로샷 클론 안정성↑ — 실측: 음색 튐 없음). backend=cosyvoice3.
-    if backend == "cosyvoice3":
+    # 0) Qwen3-TTS(별 프로세스 :8093, 12Hz 스트리밍 저지연). backend=qwen3tts|auto.
+    if backend in ("qwen3tts", "auto"):
+        try:
+            from .tts_qwen3 import Qwen3TTS
+
+            return Qwen3TTS(speaker, tts_cfg)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Qwen3-TTS 불가(%s) — CosyVoice3 폴백", e)
+    # 1) CosyVoice3(별 프로세스 :8092, 제로샷 클론 안정성↑ — 실측: 음색 튐 없음).
+    if backend in ("cosyvoice3", "auto"):
         try:
             from .tts_cosyvoice import CosyVoiceTTS
 
             return CosyVoiceTTS(speaker, tts_cfg)
         except Exception as e:  # noqa: BLE001
             log.warning("CosyVoice3 불가(%s) — Piper 폴백", e)
-    # 1) Piper(화자 A 음색 학습본, onnx torch-free)
+    # 2) Piper(화자 A 음색 학습본, onnx torch-free)
     try:
         from .tts_piper import PiperTTS
 
         return PiperTTS(speaker, tts_cfg)
     except Exception as e:  # noqa: BLE001
         log.warning("Piper TTS 불가(%s) — Kokoro 시도", e)
-    # 2) Kokoro: 패키지가 없어도 내부 tone placeholder 로 안전 폴백한다.
+    # 3) Kokoro: 패키지가 없어도 내부 tone placeholder 로 안전 폴백한다.
     from .tts_kokoro import KokoroTTS
 
     return KokoroTTS(speaker, tts_cfg)
@@ -201,7 +239,7 @@ class Orchestrator:
         self._cfg = cfg
         self.speaker = speaker
         self.vad = VAD(cfg.get("vad", {}))
-        self.asr = StreamASR(cfg.get("asr", {}))
+        self.asr = _pick_asr(cfg)
         self.llm = _pick_llm(speaker, cfg)
         self.tts = _pick_tts(speaker, cfg)
         # TTS 감정 활성 시 LLM 이 [emotion:..] 라벨을 내도록(문맥→톤 변화). 백엔드가 지원할 때만.
@@ -459,17 +497,24 @@ class Orchestrator:
                 turn.timings = val
         return turn
 
-    def stream_turn(self, audio: np.ndarray, sr: int = 16000) -> Iterator[tuple]:
+    def stream_turn(self, audio: np.ndarray, sr: int = 16000,
+                    user_text: str | None = None, record: bool = True) -> Iterator[tuple]:
         """이벤트 제너레이터 — app(WS)이 실시간 송출 + barge-in 감지에 사용.
         yield 이벤트: ("user", text) / ("text", sentence) / ("latency", ms) /
                       ("audio", np.ndarray) / ("end", reply) / ("interrupted", None)
-        """
+
+        user_text: 발화 중 스트리밍 전사(asr_streaming)가 이미 확정한 텍스트.
+        주어지면 ASR 단계를 건너뛴다(v2 지연 개선 핵심 — asr_ms ≈ 0).
+        record=False: 메타 턴(작별 인사 등 시스템 지시) — user 이벤트를 안 내보내고
+        대화 이력에도 안 남긴다(지시문이 사용자 발화로 위장되는 것 방지)."""
         self._interrupt.clear()
         t0 = time.time()
-        user_text = self.asr.transcribe(audio, sr)
+        if user_text is None:
+            user_text = self.asr.transcribe(audio, sr)
         t_asr = time.time()
         log.info("ASR 완료(%d자, %.0fms)", len(user_text), (t_asr - t0) * 1000)   # 진단(본문 X)
-        yield ("user", user_text)
+        if record:
+            yield ("user", user_text)
         if not user_text.strip():
             log.info("빈 전사 — 턴 종료(말 못 알아들음/무음)")
             yield ("end", "")
@@ -543,7 +588,7 @@ class Orchestrator:
                 continue
             break
 
-        if reply:
+        if reply and record:
             self.history.append({"role": "user", "content": user_text})
             self.history.append({"role": "assistant", "content": reply})
         yield ("timing", {

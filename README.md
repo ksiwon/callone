@@ -10,7 +10,7 @@
 
 ## 처음이라면 → **[docs/FRESH_SETUP.md](docs/FRESH_SETUP.md)**
 
-현재 확정 스택과 남은 GPU 검증은 **[docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md)**.
+현재 아키텍처와 남은 GPU 검증은 **[docs/REBUILD_PLAN.md](docs/REBUILD_PLAN.md)** (v2 정본).
 새 GPU 인스턴스에서 클론 → 스크립트 3개 → 실행까지 **한 번에** 세팅하는 절차. 이 문서 하나면 된다.
 
 ---
@@ -136,6 +136,8 @@ sequenceDiagram
 ```
 
 핵심 동작:
+- **발화 중 스트리밍 전사(v2)**: 말하는 **동안** 백그라운드 재전사(`asr_streaming.py`) → UI 실시간 자막(`partial`) + 턴 확정 시 전사가 이미 끝나 있어 **ASR 지연 ≈ 0**. 백엔드는 티어 자동(Qwen3-ASR ↔ faster-whisper 폴백).
+- **TTS 체인(v2)**: `qwen3tts`(:8093, 12Hz 스트리밍) → `cosyvoice3`(:8092, 기본) → piper/kokoro. Qwen3-TTS 승격은 `scripts/bench_v2.py` 음색 안정성 게이트 통과 후(과거 음색 튐 기각 이력 — docs/REBUILD_PLAN.md).
 - **문장 스트리밍**: LLM 응답을 모으되, 합성은 `synth_mode`로 제어 — `full`(통째 1회, 운율·음색 일관, 기본) / `sentence`(문장별, 첫음성 최저지연).
 - **입으로 못 읽는 것 제거**: `_strip_unspoken`이 이모지·괄호 해설(`(웃으며)`)·한자·대괄호 태그를 발화 직전 정제(TTS 오발음 차단).
 - **barge-in**: 클론이 말하는 중 사용자가 말하면 `interrupt()` → 진행 중 LLM/TTS/아바타 스트림을 즉시 중단하고 `("interrupted", None)`.
@@ -166,6 +168,10 @@ sequenceDiagram
 # pod 에 클립 올리기(SCP — git 커밋 금지). data/ 는 gitignore = 공개 레포에 안 올라간다.
 scp -P <포트> -i ~/.ssh/id_ed25519 clip.wav root@<IP>:/workspace/callone/data/voice_presets/warm_ko.wav
 # (선택) 전사도: .../voice_presets/warm_ko.txt
+
+# 긴 녹음에서 최적 레퍼런스 자동 추출(SNR·길이 점수화 → 프리셋으로 저장, 전사 포함):
+python scripts/pick_ref_clip.py --wav long_recording.m4a --name mom --top 3   # 단일화자 파일
+python scripts/pick_ref_clip.py --speaker A --name mom                        # 통화본(화자분리 후)
 ```
 
 > ⚠️ **권리 있는 클립만** — 본인 녹음 / 동의받은 성인 / CC0·라이선스 / 합성. 실존 인물 무단 음성 금지(README 상단 윤리·관할 법규).
@@ -196,8 +202,8 @@ cd ui && npm run dev             # :5173 (별 터미널)
 
 ## 풀 파인튜닝 파이프라인 (고급)
 긴 통화 녹음에서 화자를 분리하고 화자별 TTS·페르소나를 **학습**하는 경로(방식 B). 제로샷보다 무겁지만 충실도가 높다.
-스테이지: 적재(S0) → 음질복원(S1) → 화자분리(S2) → 라벨링(S2.5) → 전사/데이터셋(S3) → TTS학습(S4) → 페르소나(S5).
-- 학습 절차: [docs/1_로컬에서_학습.md](docs/1_로컬에서_학습.md), [docs/2_GPU에서_학습.md](docs/2_GPU에서_학습.md), [docs/5_화자A_목소리_학습.md](docs/5_화자A_목소리_학습.md)
+스테이지: 적재(S0) → 화자분리(S2) → 라벨링(S2.5) → 전사/데이터셋(S3) → 페르소나(S5). (S1 음질복원·S4 Piper 목소리학습은 폐기 — 목소리는 제로샷 클론)
+- 학습 절차: [docs/1_로컬에서_학습.md](docs/1_로컬에서_학습.md), [docs/2_GPU에서_학습.md](docs/2_GPU에서_학습.md)
 - 각 스테이지: 독립 CLI + `configs/*.yaml` + `tests/test_sX.py`. 무거운 모델 없으면 안전 폴백으로 배관만 검증.
 - `pip install -e .` (코어) / `pip install -e ".[heavy]"` (학습용).
 

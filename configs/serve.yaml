@@ -1,9 +1,9 @@
 # S6/S7 실시간 서빙 (§16, §17)
 host: "0.0.0.0"
 port: 8000
-# 실행 티어: auto 면 하드웨어 감지(common/hardware.detect_tier).
-#   server_gpu(H100/A100/4090) | laptop_cpu(노트북 Arc iGPU)   ※ 폰 경로 폐기
-# CALLONE_TIER 환경변수로 강제 가능.
+# 실행 티어: auto 면 하드웨어 감지(common/hardware.detect_tier) — v2 VRAM 4단.
+#   ultra(≥70GB: H100/A100-80) | high(20~70GB: 3090/3090Ti/4090) | mid(10~20GB) | cpu(무GPU)
+#   레거시 server_gpu/laptop_cpu 도 해석됨. CALLONE_TIER 환경변수로 강제 가능.
 tier: auto
 mode: server                   # server(고품질) | laptop(경량) — tier 가 우선
 # 워밍업: Orchestrator 생성 시 ASR/LLM/TTS 더미 1회 예열(CUDA graph 빌드 + ref 인코딩 캐시 +
@@ -18,9 +18,15 @@ vad:
   end_silence_ms: 200
 asr:
   stream: true
-  model_dir: "models/asr_dialect"     # 방언 적응본 있으면 자동 우선
+  # v2 백엔드: auto=티어별(high/ultra→qwen3, mid/cpu→whisper) | qwen3 | whisper.
+  #   qwen3 = Qwen3-ASR(한국어 52언어, serve venv 에 pip install qwen-asr). 실패 시 whisper 자동 폴백.
+  backend: auto
+  qwen_model: ""                      # 비면 티어 기본(high:0.6B, ultra:1.7B — hardware.tier_defaults)
+  # v2 스트리밍 partial: 발화 **중** 주기 재전사 → UI 자막 + 턴 종료 시 ASR 지연 ≈ 0 (REBUILD_PLAN §2).
+  partial: true
+  partial_interval_ms: 600            # 재전사 주기(↓=자막 반응↑/GPU 부담↑)
+  model_dir: "models/asr_dialect"     # 방언 적응본 있으면 자동 우선(whisper 백엔드)
   model: "auto"                       # auto=티어별(GPU:turbo, CPU:small). 고정도 가능
-  # ⚠️ §3: turbo 가 현 시점 최선인지 착수 시 재확인(Voxtral/Canary 등)
   beam_size: 1                        # greedy → 실시간 지연 최소
 llm:
   # 백엔드 선택 (callone_stack_decision.md §3: llama.cpp 채택):
@@ -31,8 +37,9 @@ llm:
   base_url: "http://127.0.0.1:8090"   # llama-server 주소(Elice 가 8080 점유 → 8090 기본. bootstrap 이 PORT 로 동기)
   config: llm_laptop           # llm_server(학습용) | llm_laptop(노트북 EXAONE-3.5-2.4B)
   enable_thinking: false       # §1-3: 대화용 thinking 비활성(응답 지연 억제)
-  # 기억 회상: extract_memories.py 로 memories.json 만든 뒤 true 권장(의미검색=삼천포 없음).
-  use_rag: false               # 사실 추출 후 true 로
+  # 기억 회상: auto = 화자에 memories.json/utterances.json 있으면 자동 ON(없으면 OFF).
+  #   파이프라인: 통화녹음 → callone-pilot(전사) → scripts/extract_memories.py → 자동 회상.
+  use_rag: auto                # auto | true | false
   embedder: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # fastembed 지원본(한국어 OK)
   rag_min_score: 0.45          # 게이트(MiniLM 기준): 미만이면 기억 안 씀. 허위회상 잦으면 ↑, 회상 약하면 ↓
   temperature: 0.4             # 실측(EXAONE-3.5-7.8B): 0.7=비문 잦음, 0.4=문법 안정. 반복은 temp 가 아니라
@@ -52,10 +59,12 @@ llm:
   # 더 길게(40~) 가능. RAG on 이면 매 턴 시스템이 바뀌어 캐시 깨지니 과하게 키우지 말 것.
   max_history: 24
 tts:
-  # cosyvoice3 = 제로샷 클론 음색 안정(실측: Qwen3-TTS 는 턴마다 음색 튐 → CosyVoice3-0.5B 채택).
-  # 별 프로세스(:8092, conda env) — setup_cosyvoice_gpu.sh. 서버 다운이면 Piper/Kokoro 폴백.
-  backend: cosyvoice3          # cosyvoice3 | piper | kokoro
+  # v2 체인: qwen3tts(:8093, 12Hz 스트리밍 저지연) → cosyvoice3(:8092) → piper → kokoro.
+  #   기본값 cosyvoice3 유지 — ⚠️ 과거 Qwen3 계열 TTS "턴마다 음색 튐" 실측 기각 이력.
+  #   신형(Qwen3-TTS-12Hz)은 scripts/bench_v2.py 음색 안정성 게이트 통과 후에만 auto/qwen3tts 로 승격.
+  backend: cosyvoice3          # qwen3tts | cosyvoice3 | auto(qwen 우선+폴백) | piper | kokoro
   cosyvoice_url: "http://127.0.0.1:8092"
+  qwen_tts_url: "http://127.0.0.1:8093"   # qwen-tts-server (scripts/setup_qwen_tts_gpu.sh)
   ref_transcribe_model: "large-v3-turbo"
   # 작업1 TTS 스트리밍: true=서버 /synth_stream(네이티브 bistream, 첫음성 ~1.3s→~0.3s).
   #   ⚠️ 우선순위①(목소리)이라 **기본 false**(통짜 /synth). 박스에서 저장 wav A/B(통짜 vs 스트리밍 음색 동일)

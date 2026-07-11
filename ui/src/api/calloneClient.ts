@@ -106,6 +106,57 @@ export async function listVoicePresets(): Promise<VoicePreset[]> {
   return r.ok ? r.json() : [];
 }
 
+// ----- 긴 통화 녹음 → 화자 분석(플로우 B). 원본은 서버 tmpfs, 분석 끝나면 즉시 삭제 -----
+export interface AnalyzeSpeaker {
+  id: string; total_sec: number; n_segments: number; best_snr: number;
+  sample_wav_b64: string;   // "누가 그 사람?" 청취 샘플(wav)
+}
+export interface AnalyzeStatus {
+  stage: "loading" | "diarize" | "scoring" | "done" | "error";
+  error?: string;
+  dummy_diarizer?: boolean; // true = pyannote 미설치 → 화자 구분 신뢰 불가(설치 안내)
+  speakers?: AnalyzeSpeaker[];
+}
+export async function analyzeVoiceStart(file: File): Promise<string> {
+  const ext = (file.name.split(".").pop() || "m4a").toLowerCase();
+  const r = await fetch(`${BASE}/api/voice/analyze?ext=${ext}`, { method: "POST", body: file });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `업로드 실패(${r.status})`);
+  return j.job_id;
+}
+export async function analyzeVoiceStatus(jobId: string): Promise<AnalyzeStatus> {
+  const r = await fetch(`${BASE}/api/voice/analyze/${jobId}`);
+  if (!r.ok) throw new Error("분석 상태 조회 실패(만료 1h?)");
+  return r.json();
+}
+export async function analyzeVoiceSave(jobId: string, speakerId: string, name: string):
+  Promise<{ preset_id: string; ref_text: string; dur: number }> {
+  const r = await fetch(`${BASE}/api/voice/analyze/${jobId}/save`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ speaker_id: speakerId, name }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "프리셋 저장 실패");
+  return j;
+}
+// 분석 job 의 통화 내용 → 그 사람 기억 자동 구축(트랙② — 전사+LLM 추출, memories.json).
+export async function analyzeVoiceRemember(jobId: string, speakerId: string, name: string):
+  Promise<{ added: number; total: number; windows: number }> {
+  const r = await fetch(`${BASE}/api/voice/analyze/${jobId}/remember`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ speaker_id: speakerId, name }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "기억 구축 실패");
+  return j;
+}
+// 최근 분석 job 목록(메타만) — 폰 업로드(/upload)를 데스크 UI 가 이어받는 용도.
+export interface VoiceJob { job_id: string; stage: string; age_s: number }
+export async function listVoiceJobs(): Promise<VoiceJob[]> {
+  const r = await fetch(`${BASE}/api/voice/jobs`);
+  return r.ok ? r.json() : [];
+}
+
 // 실시간 통화 WebSocket. 마이크 오디오(Float32) 업스트림, 음성 청크 다운스트림.
 export class CallSocket {
   private ws: WebSocket;
@@ -114,20 +165,28 @@ export class CallSocket {
     private cb: {
       onReply: (text: string, latencyMs: number) => void;
       onAudio: (pcm: Float32Array) => void;
-      onUser?: (text: string) => void;       // 내 발화 전사(이력 기록용)
+      onUser?: (text: string) => void;       // 내 발화 전사(이력 기록용, 최종)
+      onPartial?: (text: string) => void;    // v2: 발화 중 실시간 부분 전사(자막)
+      onTiming?: (stages: Record<string, number>) => void;  // v2: 단계별 ms(HUD)
+      onInterrupted?: () => void;            // v2: 서버가 응답 중단 확인
       onFrame?: (jpegB64: string) => void;   // 토킹헤드 프레임
       onReady?: () => void;                  // session_init 완료
       onAudioEnd?: () => void;               // 한 턴 송출 완료 → A/V 동기 재생 트리거
+      onClose?: () => void;                  // WS 종료(정상 stop 포함 — 키오스크 장애 감지용)
     },
   ) {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     this.ws = new WebSocket(`${proto}://${location.host}${BASE}/ws/call/${speakerId}`);
     this.ws.binaryType = "arraybuffer";
+    this.ws.onclose = () => this.cb.onClose?.();
     this.ws.onmessage = (e) => {
       if (typeof e.data === "string") {
         const msg = JSON.parse(e.data);
         if (msg.type === "reply") this.cb.onReply(msg.text, msg.latency_ms);
         else if (msg.type === "user") this.cb.onUser?.(msg.text);
+        else if (msg.type === "partial") this.cb.onPartial?.(msg.text);
+        else if (msg.type === "timing") this.cb.onTiming?.(msg.stages);
+        else if (msg.type === "interrupted") this.cb.onInterrupted?.();
         else if (msg.type === "frame") this.cb.onFrame?.(msg.jpeg_b64);
         else if (msg.type === "audio_end") this.cb.onAudioEnd?.();
         else if (msg.type === "session_ready") this.cb.onReady?.();
@@ -148,10 +207,120 @@ export class CallSocket {
   endTurn() {
     this.ws.send(JSON.stringify({ type: "end_turn" }));
   }
+  // v2 barge-in: 재생/생성 중 응답을 즉시 중단(탭-투-인터럽트 버튼).
+  interrupt() {
+    try { this.ws.send(JSON.stringify({ type: "interrupt" })); } catch { /* noop */ }
+  }
+  // 안전한 끝맺음: 클론이 작별 인사 → 재생 후 클라가 끊음(급작스러운 종료의 심리적 해악 완화).
+  // extra = 추가 연출 지시(전시 부메랑 — persona_from_survey 의 boomerang 문자열).
+  farewell(extra?: string) {
+    try { this.ws.send(JSON.stringify({ type: "farewell", extra })); } catch { /* noop */ }
+  }
   stop() {
     try { this.ws.send(JSON.stringify({ type: "stop" })); } catch { /* noop */ }
     this.ws.close();
   }
+}
+
+// 통화 이력 → 기억 성장(유저 주도 영속화 — 누르면 서버 memories.json 에 사실 추가,
+// 다음 통화부터 회상). 클라 소유 이력의 명시적 승격이라 프라이버시 원칙과 합치.
+export async function rememberCall(speakerId: string, history: Turn[]):
+  Promise<{ added: number; total: number }> {
+  const r = await fetch(`${BASE}/api/speakers/${speakerId}/remember`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ history }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "기억 저장 실패");
+  return j;
+}
+
+// ----- 전시 모드(call:one 키오스크) --------------------------------------
+// 설문 답 → 캐릭터 카드+기억 시드+부메랑(서버 persona_from_survey — 단일 진실원, 디스크 기록 0).
+export interface ExhibitPersona {
+  card: Record<string, string>;   // SessionInit 캐릭터 카드 필드와 1:1
+  memories: string[];
+  boomerang?: string;             // 작별 직전 되돌려줄 지시문 → farewell(extra)
+}
+export async function exhibitPersona(
+  name: string, answers: Record<string, unknown>, mode: "future_self" | "loved_one" = "future_self",
+): Promise<ExhibitPersona> {
+  const r = await fetch(`${BASE}/api/exhibit/persona`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, answers, mode }),
+  });
+  if (!r.ok) throw new Error("페르소나 생성 실패");
+  return r.json();
+}
+
+// 소멸 카운터(개인 데이터 0 — 숫자만). 벽면 "오늘 N개의 목소리가 태어나고 사라졌습니다".
+export interface ExhibitCount { day: string; today: number; total: number }
+export async function exhibitCount(): Promise<ExhibitCount> {
+  const r = await fetch(`${BASE}/api/exhibit/count`);
+  if (!r.ok) return { day: "", today: 0, total: 0 };
+  return r.json();
+}
+export async function exhibitDissolve(): Promise<ExhibitCount> {
+  const r = await fetch(`${BASE}/api/exhibit/dissolve`, { method: "POST" });
+  if (!r.ok) return { day: "", today: 0, total: 0 };
+  return r.json();
+}
+
+// AI 인터뷰어 카드(트랙③ 제작) — 통화 셋업에 적용할 캐릭터 카드 + AVP 변형 질문지.
+export async function exhibitInterviewer(name = ""):
+  Promise<{ card: Record<string, string>; questions: string[] }> {
+  const r = await fetch(`${BASE}/api/exhibit/interviewer?name=${encodeURIComponent(name)}`);
+  if (!r.ok) throw new Error("인터뷰어 카드 로드 실패");
+  return r.json();
+}
+
+// 전시 이벤트 버스 — 물리 전화기(GPIO 브리지) ↔ 키오스크.
+export async function exhibitEvent(event: "hook_up" | "hook_down" | "ring_start" | "ring_stop") {
+  try {
+    await fetch(`${BASE}/api/exhibit/event`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event }),
+    });
+  } catch { /* 연출용 — 실패 무해 */ }
+}
+export class ExhibitEvents {
+  private ws: WebSocket | null = null;
+  private closed = false;
+  constructor(private onEvent: (ev: string) => void) { this.connect(); }
+  private connect() {
+    if (this.closed) return;
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    this.ws = new WebSocket(`${proto}://${location.host}${BASE}/ws/exhibit/events`);
+    this.ws.onmessage = (e) => {
+      try {
+        const m = JSON.parse(e.data);
+        if (m.type === "event") this.onEvent(m.event);
+      } catch { /* noop */ }
+    };
+    this.ws.onclose = () => { if (!this.closed) setTimeout(() => this.connect(), 3000); };
+  }
+  close() { this.closed = true; try { this.ws?.close(); } catch { /* noop */ } }
+}
+
+// 마이크 Float32 PCM → 16bit WAV base64 — 키오스크 현장 녹음을 ref_audio_b64 로 보내는 용도.
+export function pcmToWavB64(pcm: Float32Array, sr: number): string {
+  const buf = new ArrayBuffer(44 + pcm.length * 2);
+  const v = new DataView(buf);
+  const str = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + pcm.length * 2, true); str(8, "WAVE");
+  str(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) {
+    const s = Math.max(-1, Math.min(1, pcm[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
 }
 
 // 파일 → base64(데이터URL 접두 제거). 음성/사진 전송용.

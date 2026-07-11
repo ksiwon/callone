@@ -100,6 +100,19 @@ def estimate_snr_db(y: np.ndarray, frame: int = 2048) -> float:
     return float(10.0 * np.log10(signal / (noise + 1e-12)))
 
 
+def ref_clip_score(snr_db: float, dur: float, min_s: float = 6.0, max_s: float = 12.0,
+                   ideal_s: float = 9.0) -> float:
+    """제로샷 레퍼런스 클립 적합도 — SNR 60% + 길이 적합도 40%(ideal_s 정점).
+
+    범위 밖 길이는 -1(탈락). scripts/pick_ref_clip.py 와 serve.voice_analyze 공용
+    (같은 기준으로 CLI/UI 가 같은 클립을 고르게)."""
+    if not (min_s <= dur <= max_s):
+        return -1.0
+    snr_n = min(max(snr_db, 0.0), 25.0) / 25.0          # 25dB 이상은 동급
+    dur_n = 1.0 - min(abs(dur - ideal_s) / ideal_s, 1.0)
+    return 0.6 * snr_n + 0.4 * dur_n
+
+
 def cosine(a: np.ndarray, b: np.ndarray) -> float:
     a = np.asarray(a, dtype=np.float64).ravel()
     b = np.asarray(b, dtype=np.float64).ravel()

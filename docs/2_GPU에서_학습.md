@@ -4,11 +4,10 @@
 
 ## A. 로컬에서 업로드 (Windows)
 ```powershell
-# 녹음 m4a 전부 data\raw\ 에 넣은 뒤, 한 줄:
-.\scripts\upload_to_elice.ps1 -Pem "$env:USERPROFILE\.ssh\elice-xxxx.pem" -Port [포트]
+# 녹음 m4a 전부 data\raw\ 에 넣은 뒤 scp 로 업로드(RunPod 예):
+scp -P <포트> -i ~/.ssh/id_ed25519 -r data/raw root@<IP>:/workspace/callone/data/
 ```
-- `.pem`(개인키)·`[포트]`는 엘리스 Run Box "연결 정보"에서 확인.
-- 불필요한 것 빼고 `tar`로 묶어 자동 업로드. 끝나면 다음 명령을 출력해줌.
+(구 Elice 전용 업로드 헬퍼는 폐기 — scp 면 충분.)
 
 ## B. 서버에서 설치 + 데이터 처리 (한 줄)
 ```bash
@@ -33,9 +32,7 @@ callone-correct --hours 3
 #   → data/datasets/asr_correction/to_correct.csv 의 corrected_text 칸을 사람이 교정 후:
 callone-asr-train
 
-# (2) 목소리 복제
-bash scripts/setup_piper_gpu.sh              # Piper 학습 환경
-# 실제 학습 절차: docs/5_화자A_목소리_학습.md (화자별 반복)
+# (2) 목소리 복제 — 학습 불필요(제로샷): 통화 시작 시 5~10초 음성 업로드로 즉시 클론
 
 # (3) 말투·성격 복제
 callone-llm-train  --config llm_server --speakers A B   # 풀튜닝 경로(서빙 기본 32B와 별개)
@@ -44,8 +41,7 @@ callone-llm-train  --config llm_laptop --speakers A B   # 노트북용 EXAONE-3.
 
 ## 결과물 (학습된 모델)
 - `models/asr_dialect/` — 방언 적응 ASR
-- `models/tts_piper/{A,B}.onnx` — 학습된 목소리
-- `models/llm_server/{A,B}/`, `models/llm_laptop/{A,B}/` — 말투
+- `models/llm_server/{A,B}/`, `models/llm_laptop/{A,B}/` — 말투(LoRA 어댑터)
 
 이 `models/` 폴더를 노트북으로 가져가면 통화 가능 → [3번](3_노트북에서_통화.md).
 

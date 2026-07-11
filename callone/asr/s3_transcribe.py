@@ -42,9 +42,9 @@ def _pick_model(cfg: dict) -> str:
     model = cfg.get("model", "auto")
     if model == "auto":
         # 티어 자동: GPU=large-v3(정확), CPU=small(가벼움)
-        from ..common.hardware import detect_tier
+        from ..common.hardware import is_gpu_tier
 
-        model = "large-v3" if detect_tier() == "server_gpu" else "small"
+        model = "large-v3" if is_gpu_tier() else "small"
         log.info("ASR 모델 자동선택: %s", model)
     return model
 

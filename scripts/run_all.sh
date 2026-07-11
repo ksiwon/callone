@@ -18,6 +18,7 @@ LOG="${LOGDIR:-$HOME}"
 if [ "${1:-}" = "stop" ]; then
   pkill -f "llama-server" 2>/dev/null; pkill -f "avatar_server" 2>/dev/null
   pkill -f "callone-serve" 2>/dev/null; pkill -f "cosyvoice_server/app.py" 2>/dev/null
+  pkill -f "qwen_tts_server/app.py" 2>/dev/null
   echo "서비스 종료."; exit 0
 fi
 
@@ -29,14 +30,29 @@ else
   PORT="$PORT_LLM" bash scripts/bootstrap_gpu.sh
 fi
 
-# ①.5 cosyvoice-server (conda env, :8092) — 음색 안정 TTS. env 있을 때만(없으면 Qwen 폴백).
+# ①.5 cosyvoice-server (conda env, :8092) — 음색 안정 TTS(기본 백엔드). env 있을 때만.
 if curl -s "http://127.0.0.1:8092/health" 2>/dev/null | grep -q '"status"'; then
   echo "[cosy] cosyvoice-server 이미 :8092 ✅"
 elif [ -d "$HOME/CosyVoice" ] && (source "$(conda info --base 2>/dev/null || echo "$HOME/miniconda3")/etc/profile.d/conda.sh" 2>/dev/null && conda env list 2>/dev/null | grep -q '^cosyvoice\b'); then
   echo "[cosy] cosyvoice-server 기동(:8092, 모델로드 ~30s)..."
   nohup bash scripts/setup_cosyvoice_gpu.sh run > "$LOG/cosyvoice.log" 2>&1 &
 else
-  echo "[cosy] cosyvoice env 없음 → TTS 는 Piper/Kokoro 폴백(scripts/setup_cosyvoice_gpu.sh 로 설치 권장)."
+  echo "[cosy] cosyvoice env 없음 → TTS 는 qwen3tts/Piper 폴백(scripts/setup_cosyvoice_gpu.sh 로 설치 권장)."
+fi
+
+# ①.6 qwen-tts-server (.venv-qwentts, :8093) — v2 저지연 스트리밍 TTS(게이트 통과 전엔 벤치/A-B용).
+#   티어 자동: VRAM ≥70GB(H100/A100-80) → 1.7B, 아니면 0.6B (QWEN_TTS_MODEL env 로 강제).
+if curl -s "http://127.0.0.1:8093/health" 2>/dev/null | grep -q '"status"'; then
+  echo "[qwen] qwen-tts-server 이미 :8093 ✅"
+elif [ -d .venv-qwentts ]; then
+  VRAM_GB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | awk '{print int($1/1024)}')"
+  if [ -z "${QWEN_TTS_MODEL:-}" ] && [ "${VRAM_GB:-0}" -ge 70 ]; then
+    export QWEN_TTS_MODEL="Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+  fi
+  echo "[qwen] qwen-tts-server 기동(:8093, ${QWEN_TTS_MODEL:-0.6B 기본})..."
+  nohup bash scripts/setup_qwen_tts_gpu.sh run > "$LOG/qwentts.log" 2>&1 &
+else
+  echo "[qwen] .venv-qwentts 없음 → qwen3tts 생략(scripts/setup_qwen_tts_gpu.sh 로 설치)."
 fi
 
 # DITTO_* env 자가치유: run_all 을 `source ~/.bashrc` 없이 돌려도 Ditto 가 뜨게 한다(=static 폴백의
@@ -95,6 +111,7 @@ if [ "$AVATAR_BACKEND" = "ditto" ] && curl -s "http://127.0.0.1:8091/health" 2>/
 fi
 _wait "serve"   "http://127.0.0.1:8000/api/health"   30
 _wait "cosy"    "http://127.0.0.1:8092/health"       60
+[ -d .venv-qwentts ] && _wait "qwentts" "http://127.0.0.1:8093/health" 90
 cat <<EOF
 --- 다음 ---
   UI:  cd ui && npm run dev        (별 터미널)  → 브라우저 localhost:5173/call/me

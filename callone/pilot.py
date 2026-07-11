@@ -5,7 +5,7 @@
 
 사용:
   callone-pilot --n 50 --speaker A
-  callone-pilot --stages s0 s1 s2        # 일부만
+  callone-pilot --stages s0 s2           # 일부만
 """
 from __future__ import annotations
 
@@ -19,8 +19,7 @@ log = get_logger("pilot")
 # ⚠️ 순서 중요(로컬 디버깅으로 확정):
 #   분리(s2) → 전사(s3, diarized 에 text 채움) → 연결(s2b, parquet 에 text 복사)
 #   → 프로필(s25) → 데이터셋. link 가 transcribe 보다 먼저면 parquet text 가 빔.
-# S1(복원)은 denoise 모델 미설치 시 무용(CPU 업샘플뿐) → 기본 제외.
-#   음질 강화 원하면 `pip install deepfilternet` 후 --stages 에 s1 추가.
+# S1(음질복원)은 폐기됨(denoise 모델 미설치 시 무용 → 실사용 0, v2 정리 때 삭제).
 STAGES = ["s0", "s2", "s3", "s2b", "s25", "build_tts", "build_dlg", "sft"]
 
 
@@ -31,11 +30,6 @@ def run(n: int, speaker: str, stages: list[str]) -> None:
         from .ingest.s0_convert import run as s0
         s0(load_config("s0_ingest"), limit=n)
         report["stages"]["s0"] = "done"
-
-    if "s1" in stages:
-        from .restore.s1_restore import run as s1
-        s1(load_config("s1_restore"), limit=n)
-        report["stages"]["s1"] = "done"
 
     if "s2" in stages:
         from .diarize.s2_diarize import run as s2
@@ -74,7 +68,7 @@ def run(n: int, speaker: str, stages: list[str]) -> None:
 
     write_json(data_dir().parent / "reports" / "pilot_report.json", report)
     log.info("파일럿 완료: %s", report["stages"])
-    log.info("다음(무거운 학습): callone-asr-train / setup_piper_gpu.sh / callone-llm-train")
+    log.info("다음(무거운 학습): callone-asr-train / callone-llm-train (목소리는 제로샷 — 학습 없음)")
 
 
 def main() -> None:

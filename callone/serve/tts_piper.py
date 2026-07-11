@@ -1,8 +1,8 @@
-"""Piper TTS 백엔드 (노트북 온디바이스, 화자 A 음색 학습본) — onnx, torch-free.
+"""Piper TTS 백엔드 (노트북 온디바이스 폴백) — onnx, torch-free.
 
-화자 A TTS 데이터셋(data/datasets/{spk}/tts, 73.8분)으로 Piper 음성 모델을 학습해
-(scripts/train_piper.md) onnx 로 내보낸 것을 구동. onnxruntime + piper-phonemize 라
-**torch 없이 CPU 실시간**. 문장 단위 스트리밍.
+과거에 학습해 둔 Piper onnx 를 구동만 한다(학습 경로는 v2 정리 때 폐기 — 목소리는
+제로샷 클론이 정본). onnxruntime + piper-phonemize 라 **torch 없이 CPU 실시간**.
+문장 단위 스트리밍.
 
 모델 위치: models/tts_piper/{speaker}.onnx (+ {speaker}.onnx.json 설정).
 미설치/모델없음 → 예외 → orchestrator 가 KokoroTTS/placeholder 로 폴백.
@@ -33,7 +33,7 @@ class PiperTTS:
         onnx, jcfg = _model_paths(speaker)
         if not onnx.exists():
             raise FileNotFoundError(
-                f"Piper 음성 모델 없음: {onnx} (scripts/train_piper.md 로 학습+export)")
+                f"Piper 음성 모델 없음: {onnx} (기존 학습본 onnx 배치 시에만 사용 — 기본은 제로샷)")
         from piper import PiperVoice  # type: ignore  # pip install piper-tts
 
         self.voice = PiperVoice.load(str(onnx), config_path=str(jcfg) if jcfg.exists() else None)

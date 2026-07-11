@@ -30,11 +30,52 @@ from ..common.schemas import SpeakerProfile
 log = get_logger("app")
 
 try:
-    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
 except Exception:  # noqa: BLE001
     FastAPI = None  # type: ignore
+
+
+# 폰 업로드 페이지(전시 트랙②) — 외부 리소스 0(오프라인 AP 에서도 동작), call:one 디자인 언어.
+# 파일 → POST /api/voice/analyze → job 코드 표시 → 접수 데스크가 /api/voice/jobs 로 이어받음.
+_UPLOAD_HTML = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>call:one — 파일 보내기</title><style>
+body{margin:0;background:#F4F0E6;color:#221E16;font-family:'Pretendard','Apple SD Gothic Neo',
+'Malgun Gothic',system-ui,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center}
+main{max-width:420px;padding:36px 26px;text-align:center}
+h1{font-family:'Noto Serif KR','NanumMyeongjo',Batang,serif;font-weight:600;font-size:26px;margin:0 0 6px}
+h1 b{color:#B5402C;font-weight:600}
+p{color:#776F5E;font-size:14px;line-height:1.75;margin:10px 0}
+label{display:block;border:1px dashed #776F5E;padding:22px 14px;margin:22px 0;cursor:pointer;font-size:14px;color:#776F5E}
+input{display:none}
+#st{font-family:'IBM Plex Mono',Consolas,monospace;font-size:13px;letter-spacing:.08em;color:#776F5E;min-height:20px}
+#code{font-family:'IBM Plex Mono',Consolas,monospace;font-size:34px;letter-spacing:.2em;color:#B5402C;margin:8px 0}
+hr{border:none;border-top:1px solid #CBC3B0;margin:24px 0}
+small{font-family:'IBM Plex Mono',Consolas,monospace;font-size:11px;color:#776F5E;line-height:1.8}
+</style></head><body><main>
+<h1>call<b>:</b>one</h1>
+<p>소중한 사람과의 통화 녹음 한 통을 보내주세요.<br>m4a · mp3 · wav — 몇 시간짜리도 괜찮아요.</p>
+<label id="box">파일 선택<input type="file" accept="audio/*" id="f"></label>
+<div id="st"></div><div id="code"></div>
+<hr><small>이 파일은 이 방을 떠나지 않습니다.<br>분석이 끝나는 즉시 원본은 삭제됩니다.</small>
+<script>
+const f=document.getElementById('f'),st=document.getElementById('st'),
+box=document.getElementById('box'),code=document.getElementById('code');
+const S={loading:'받는 중',diarize:'목소리를 찾는 중',scoring:'좋은 구간 고르는 중',
+done:'완료 — 접수 데스크에 이 코드를 보여주세요',error:'실패 — 데스크에 문의해주세요'};
+f.onchange=async()=>{const file=f.files[0];if(!file)return;
+box.textContent=file.name;st.textContent='보내는 중…';
+const ext=(file.name.split('.').pop()||'m4a').toLowerCase();
+try{const r=await fetch('/api/voice/analyze?ext='+ext,{method:'POST',body:file});
+const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);
+const jid=j.job_id;code.textContent=jid.slice(0,6).toUpperCase();
+const t=setInterval(async()=>{try{const s=await(await fetch('/api/voice/analyze/'+jid)).json();
+st.textContent=S[s.stage]||s.stage;if(s.stage==='done'||s.stage==='error')clearInterval(t);
+}catch(e){st.textContent=S.error;clearInterval(t)}},2000);
+}catch(e){st.textContent='실패: '+e.message}};
+</script></main></body></html>"""
 
 
 def _speakers_dir() -> Path:
@@ -109,6 +150,188 @@ def create_app():
         클립 자체는 서버 로컬(gitignore) — 목록만 노출(id·label)."""
         from .voice_presets import list_presets
         return list_presets()
+
+    # ----- 긴 통화 녹음 → 화자별 ref 추출 (UI 플로우 B, voice_analyze) ------
+    @app.post("/api/voice/analyze")
+    async def voice_analyze_start(request: Request):
+        """긴 녹음(raw body, 수십 MB~) 업로드 → 화자분리+구간점수 job 시작.
+        ?ext=m4a 확장자 힌트(디코딩용). 원본은 tmpfs, 분석 후 즉시 삭제."""
+        raw = await request.body()
+        if not raw or len(raw) < 10_000:
+            return JSONResponse({"error": "오디오가 비었거나 너무 작음"}, status_code=400)
+        ext = "." + (request.query_params.get("ext") or "m4a").lstrip(".").lower()
+        from .voice_analyze import start_job
+
+        return {"job_id": start_job(raw, suffix=ext)}
+
+    @app.get("/api/voice/analyze/{job_id}")
+    def voice_analyze_status(job_id: str):
+        from .voice_analyze import job_status
+
+        st = job_status(job_id)
+        if st is None:
+            return JSONResponse({"error": "job 없음(만료 1h)"}, status_code=404)
+        return st
+
+    _analyze_asr: dict = {}   # 프리셋 전사용 ASR 1회 로드 캐시
+
+    @app.post("/api/voice/analyze/{job_id}/save")
+    async def voice_analyze_save(job_id: str, payload: dict):
+        """선택 화자의 best 클립 → 프리셋 저장. body: {speaker_id, name}"""
+        import asyncio
+
+        from .voice_analyze import save_pick
+
+        def _work():
+            asr = _analyze_asr.get("asr")
+            if asr is None:
+                try:
+                    from .asr_stream import StreamASR
+
+                    asr = StreamASR(load_config("serve").get("asr", {}))
+                except Exception:  # noqa: BLE001
+                    asr = None
+                _analyze_asr["asr"] = asr
+            return save_pick(job_id, str(payload.get("speaker_id", "")),
+                             str(payload.get("name", "")), asr=asr)
+
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(None, _work)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+
+    @app.post("/api/voice/analyze/{job_id}/remember")
+    async def voice_analyze_remember(job_id: str, payload: dict):
+        """분석 job 의 통화 내용 → 선택 화자의 기억 자동 구축 (전시 트랙②).
+        body: {speaker_id, name}. 분석 중 확보한 오디오 창을 전사(ASR)하고
+        LLM 으로 사실 추출 → data/speakers/<name>/memories.json. ASR·LLM 필요."""
+        import asyncio
+
+        from .voice_analyze import remember_pick
+
+        def _work():
+            asr = _analyze_asr.get("asr")
+            if asr is None:
+                try:
+                    from .asr_stream import StreamASR
+
+                    asr = StreamASR(load_config("serve").get("asr", {}))
+                except Exception:  # noqa: BLE001
+                    asr = None
+                _analyze_asr["asr"] = asr
+            base_url = (load_config("serve").get("llm") or {}).get(
+                "base_url", "http://127.0.0.1:8090")
+            return remember_pick(job_id, str(payload.get("speaker_id", "")),
+                                 str(payload.get("name", "")), asr=asr, base_url=base_url)
+
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(None, _work)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"기억 구축 실패(ASR/llama-server 확인): {e}"},
+                                status_code=503)
+
+    @app.get("/api/voice/jobs")
+    def voice_jobs():
+        """최근 분석 job 목록(메타만 — 내용 0). 폰 업로드(/upload)를 데스크가 이어받는 용도."""
+        from .voice_analyze import list_jobs
+        return list_jobs()
+
+    @app.get("/upload")
+    def upload_page():
+        """폰 업로드 페이지(전시 트랙② — 로컬 Wi-Fi AP + QR 의 목적지).
+        외부 리소스 0(오프라인), 원 파일은 분석 후 즉시 삭제. EXHIBIT_PLAN §3."""
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(_UPLOAD_HTML)
+
+    @app.post("/api/speakers/{sid}/remember")
+    async def remember(sid: str, payload: dict):
+        """통화 이력 → 기억 성장(유저 주도 영속화). body: {history:[{role,content}]}
+        클라 소유 이력을 유저가 명시적으로 서버 기억(memories.json)에 승격 —
+        다음 통화부터 use_rag(auto)가 회상. LLM(llama-server) 필요."""
+        import asyncio
+
+        from ..llm.memory_update import remember_from_history
+
+        history = payload.get("history") or []
+        if not isinstance(history, list) or not history:
+            return JSONResponse({"error": "history 비었음"}, status_code=400)
+        base_url = (load_config("serve").get("llm") or {}).get("base_url",
+                                                               "http://127.0.0.1:8090")
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(
+                None, lambda: remember_from_history(sid, history, base_url))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"기억 추출 실패(llama-server 확인): {e}"},
+                                status_code=503)
+
+    # ----- 전시 모드(call:one 키오스크) ------------------------------------
+    @app.post("/api/exhibit/persona")
+    def exhibit_persona(payload: dict):
+        """설문 답 → 캐릭터 카드+기억 시드+부메랑(persona_from_survey 래핑 — 단일 진실원).
+        body: {name?, answers, mode?}. 순수 템플릿(LLM 불필요), 디스크 기록 0."""
+        from ..llm.persona_survey import persona_from_survey
+        try:
+            return persona_from_survey(payload.get("name") or "",
+                                       payload.get("answers") or {},
+                                       payload.get("mode") or "future_self")
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    @app.get("/api/exhibit/count")
+    def exhibit_count():
+        from .exhibit import current
+        return current()
+
+    @app.post("/api/exhibit/dissolve")
+    def exhibit_dissolve():
+        """세션 소멸 1회 집계(개인 데이터 0 — 숫자만)."""
+        from .exhibit import bump
+        return bump()
+
+    @app.get("/api/exhibit/interviewer")
+    def exhibit_interviewer(name: str = ""):
+        """AI 인터뷰어 카드(트랙③ 제작) — 통화 셋업에 그대로 적용할 캐릭터 카드 + 질문지."""
+        from ..llm.interviewer import QUESTIONS, interviewer_card
+        return {"card": interviewer_card(name), "questions": QUESTIONS}
+
+    # 전시 이벤트 버스 — 물리 전화기(GPIO 브리지) ↔ 키오스크 브라우저.
+    # 브리지: 후크 스위치 → POST hook_up/hook_down. 키오스크: ring_start/ring_stop → 브리지가 벨 구동.
+    _exhibit_subs: list[WebSocket] = []
+
+    @app.websocket("/ws/exhibit/events")
+    async def exhibit_events(ws: WebSocket):
+        await ws.accept()
+        _exhibit_subs.append(ws)
+        try:
+            while True:
+                await ws.receive_text()          # 구독 전용(수신 무시 — keepalive 허용)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            if ws in _exhibit_subs:
+                _exhibit_subs.remove(ws)
+
+    @app.post("/api/exhibit/event")
+    async def exhibit_event(payload: dict):
+        """이벤트 브로드캐스트. body: {event: hook_up|hook_down|ring_start|ring_stop}"""
+        ev = str(payload.get("event") or "").strip()
+        if ev not in ("hook_up", "hook_down", "ring_start", "ring_stop"):
+            return JSONResponse({"error": f"unknown event: {ev}"}, status_code=400)
+        msg = json.dumps({"type": "event", "event": ev})
+        delivered = 0
+        for ws in list(_exhibit_subs):
+            try:
+                await ws.send_text(msg)
+                delivered += 1
+            except Exception:  # noqa: BLE001
+                if ws in _exhibit_subs:
+                    _exhibit_subs.remove(ws)
+        return {"delivered": delivered}
 
     @app.get("/api/speakers/{sid}/profile")
     def get_profile(sid: str):
@@ -196,13 +419,34 @@ def create_app():
         orch = _orchestrators[speaker_id]
         buf: list = []
         gen_task = None     # 현재 응답 생성·송출 태스크(한 번에 하나)
+        stt = None          # 발화 중 스트리밍 전사 세션(v2) — 턴마다 새로 만들고 finalize
 
-        async def _run_turn(audio):
-            """응답 생성(스레드) → 큐 → WS 송출. 이 코루틴은 **수신 안 함**(단일 수신자 규칙)."""
+        # v2: 발화 중 partial 전사(자막 + 턴 종료 시 ASR 지연 0). asr.partial: false 로 끌 수 있음.
+        _serve_cfg = load_config("serve")
+        _partial_on = bool((_serve_cfg.get("asr") or {}).get("partial", True))
+        _partial_ms = int((_serve_cfg.get("asr") or {}).get("partial_interval_ms", 600))
+
+        def _send_partial(text: str):
+            """전사 워커 스레드 → WS(partial 자막). 실패 무해(끊긴 뒤 늦게 온 콜백 등)."""
+            import asyncio as _aio
+
+            _aio.run_coroutine_threadsafe(
+                ws.send_text(json.dumps({"type": "partial", "text": text},
+                                        ensure_ascii=False)), loop)
+
+        def _new_stt():
+            from .asr_streaming import StreamingTranscriber
+
+            return StreamingTranscriber(orch.asr, sr=16000, interval_ms=_partial_ms,
+                                        on_partial=_send_partial)
+
+        async def _run_turn(audio, user_text=None, record=True):
+            """응답 생성(스레드) → 큐 → WS 송출. 이 코루틴은 **수신 안 함**(단일 수신자 규칙).
+            record=False = 메타 턴(작별 지시 등): user 이벤트·이력에 안 남김."""
             q: asyncio.Queue = asyncio.Queue()
 
             def _producer():
-                for ev in orch.stream_turn(audio, sr=16000):
+                for ev in orch.stream_turn(audio, sr=16000, user_text=user_text, record=record):
                     loop.call_soon_threadsafe(q.put_nowait, ev)
                 loop.call_soon_threadsafe(q.put_nowait, ("_done", None))
 
@@ -224,6 +468,8 @@ def create_app():
                         await ws.send_text(json.dumps({"type": "user", "text": val}, ensure_ascii=False))
                     elif kind == "latency":
                         await ws.send_text(json.dumps({"type": "latency_ms", "value": val}))
+                    elif kind == "timing":   # 단계별 ms(v2 HUD) — 본문 아닌 숫자만(프라이버시 무관)
+                        await ws.send_text(json.dumps({"type": "timing", "stages": val}))
                     elif kind == "interrupted":
                         await ws.send_text(json.dumps({"type": "interrupted"}))
             finally:
@@ -260,7 +506,28 @@ def create_app():
                         await _finish_gen()              # 이전 응답 정리 후 새 턴(직렬화)
                         audio = np.concatenate(buf) if buf else np.zeros(1, np.float32)
                         buf = []
-                        gen_task = asyncio.ensure_future(_run_turn(audio))
+                        # v2: 발화 중 이미 전사됨 → finalize(꼬리만 1회) 결과를 턴에 주입(ASR 지연 0).
+                        user_text = None
+                        if stt is not None:
+                            _s = stt; stt = None
+                            user_text = await loop.run_in_executor(None, _s.finalize)
+                            if user_text is not None and not user_text.strip():
+                                user_text = None         # partial 실패 시 orch 가 통짜 전사 폴백
+                        gen_task = asyncio.ensure_future(_run_turn(audio, user_text))
+                    elif t == "farewell":
+                        # 안전한 끝맺음(연구 근거: 급작스러운 종료의 심리적 해악) — 클론이
+                        # 짧은 작별 인사를 하고 클라가 재생 후 끊는다. 메타 턴(record=False):
+                        # 지시문이 이력/자막에 사용자 발화로 남지 않음.
+                        # extra = 추가 연출 지시(전시 부메랑: persona_survey 의 boomerang 문자열).
+                        await _finish_gen()
+                        buf = []
+                        fare = ("(사용자가 이제 통화를 끝내려고 한다. 지금까지의 대화 분위기에"
+                                " 맞춰 짧고 따뜻한 작별 인사를 한두 문장으로 해라.)")
+                        extra = str(ctrl.get("extra") or "").strip()[:300]
+                        if extra:
+                            fare += " " + extra
+                        gen_task = asyncio.ensure_future(
+                            _run_turn(np.zeros(1, np.float32), user_text=fare, record=False))
                     elif t in ("interrupt", "stop"):
                         orch.interrupt()
                         if t == "stop":
@@ -273,12 +540,22 @@ def create_app():
                         # 불필요 → 생성 중 바이트는 버퍼링도 인터럽트도 안 하고 버린다.
                         # 진짜 끊기는 명시적 'interrupt'/'stop' 제어 메시지로만.
                         continue
-                    buf.append(np.frombuffer(msg["bytes"], dtype=np.float32))
+                    chunk = np.frombuffer(msg["bytes"], dtype=np.float32)
+                    buf.append(chunk)
+                    if _partial_on:                      # 발화 중 스트리밍 전사(v2)
+                        if stt is None:
+                            stt = _new_stt()
+                        stt.feed(chunk)
         except WebSocketDisconnect:
             log.info("통화 종료 speaker=%s", speaker_id)
         finally:
             if gen_task and not gen_task.done():
                 gen_task.cancel()
+            if stt is not None:                          # 발화 버퍼도 즉시 폐기(ephemeral)
+                try:
+                    stt.close()
+                except Exception:  # noqa: BLE001
+                    pass
             # 프라이버시: 연결 끊기면 인메모리 개인데이터(ref tmpfs·이력·아바타) 즉시 폐기.
             try:
                 await loop.run_in_executor(None, orch.cleanup_session)
