@@ -1,4 +1,4 @@
-// KioskScreen — 전시 《call:one》 트랙① 《나》 무인 키오스크 (docs/EXHIBIT_PLAN §2).
+// KioskScreen — 전시 《call:one》 트랙① ECHO 《메아리》 무인 키오스크 (demo/EXHIBIT_PLAN §2).
 // 루프: 대기 → 동의 → 설문(7) → 녹음 10초 → 준비 → 벨 → 통화(시간제한→작별+부메랑) → 소멸 → 대기.
 // 음성 전용(전화기 경험 — 화면에 대화 내용 표시 안 함). 개인데이터는 세션 인메모리, 종료 즉시 폐기.
 // 운영: /kiosk 로 진입. 통화 시간(초)은 localStorage.callone_kiosk_limit 로 조정(기본 110).

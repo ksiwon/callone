@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>call:one — 전시 데모</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css" />
+<style>
+  :root{
+    --paper:#F4F0E6; --paper2:#ECE6D8; --ink:#221E16; --ink2:#3A3427;
+    --soft:#8A7E6A; --line:#DDD4C2; --accent:#B5402C; --accent2:#C7583F;
+    --amber:#C08A38; --teal:#3E8E6E;
+    --night:#16120C; --night2:#211A11; --ncard:rgba(28,22,14,.55);
+    --nline:rgba(240,230,210,.09); --ntext:#EBE3D2; --nsoft:#9C8F78;
+    --mono:ui-monospace,'SF Mono','Cascadia Code',Menlo,Consolas,monospace;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; }
+  body{
+    background:radial-gradient(130% 100% at 50% -12%, #2A2113 0%, var(--night) 58%, #0D0A06 100%);
+    font-family:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    color:var(--ntext); overflow:hidden; -webkit-font-smoothing:antialiased;
+  }
+  #root{ width:100vw; height:100vh; }
+  .viewport{ position:fixed; inset:0; display:flex; flex-direction:column; }
+  .stagearea{ flex:1 1 auto; min-height:0; width:100%; display:flex; align-items:center; justify-content:center; }
+  .sizer{ position:relative; flex:0 0 auto; }
+  .stage{
+    width:1920px; height:1080px; position:absolute; top:0; left:0; transform-origin:top left;
+    background-image:radial-gradient(rgba(240,230,210,.028) 1.4px, transparent 1.4px);
+    background-size:26px 26px; background-position:center;
+  }
+
+  /* ---------- header ---------- */
+  .topbar{ position:absolute; top:30px; left:0; right:0; display:flex; flex-direction:column; align-items:center; gap:16px; }
+  .brand{ display:flex; align-items:baseline; gap:16px; }
+  .wm{ font-size:46px; font-weight:800; letter-spacing:-.03em; color:var(--paper); }
+  .wm .co{ color:var(--accent); animation:colon 1.15s steps(1) infinite; }
+  @keyframes colon{ 50%{ opacity:.28; } }
+  .brand .kick{ font-family:var(--mono); font-size:14px; letter-spacing:.34em; text-transform:uppercase; color:var(--nsoft); }
+
+  .tabs{ display:flex; gap:12px; }
+  .tab{ display:flex; flex-direction:column; align-items:center; gap:3px; cursor:pointer;
+    padding:10px 26px; border-radius:14px; background:rgba(240,230,210,.04);
+    border:1px solid var(--nline); transition:all .3s ease; }
+  .tab:hover{ background:rgba(240,230,210,.08); }
+  .tab .en{ font-family:var(--mono); font-size:15px; font-weight:700; letter-spacing:.16em; color:var(--nsoft); transition:color .3s; }
+  .tab .ko{ font-size:14px; font-weight:600; color:#7C7059; transition:color .3s; }
+  .tab.on{ background:rgba(181,64,44,.14); border-color:rgba(181,64,44,.5); box-shadow:0 0 30px -10px rgba(181,64,44,.5); }
+  .tab.on .en{ color:var(--accent2); }
+  .tab.on .ko{ color:var(--paper); }
+
+  .controls{ display:flex; align-items:center; gap:14px; background:rgba(15,11,6,.7); backdrop-filter:blur(12px);
+    border:1px solid var(--nline); border-radius:999px; padding:8px 16px; }
+  .ctlbtn{ width:36px; height:36px; border-radius:50%; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    background:rgba(240,230,210,.08); color:var(--paper); transition:background .2s; }
+  .ctlbtn:hover{ background:rgba(240,230,210,.16); }
+  .ctlbtn.play{ background:var(--accent); width:40px; height:40px; }
+  .ctlbtn.play:hover{ background:var(--accent2); }
+  .ctlbtn svg{ width:16px; height:16px; }
+  .track{ width:300px; height:5px; border-radius:4px; background:rgba(240,230,210,.13); cursor:pointer; position:relative; overflow:hidden; }
+  .track .fill{ position:absolute; left:0; top:0; bottom:0; background:linear-gradient(90deg,var(--amber),var(--accent)); border-radius:4px; transition:width .25s linear; }
+  .scene{ font-family:var(--mono); font-size:13px; font-weight:600; color:#B7A98E; min-width:110px; letter-spacing:.02em; }
+  .scene b{ color:var(--paper); }
+
+  /* ---------- phones row ---------- */
+  .phones{ position:absolute; top:236px; left:0; right:0; display:flex; justify-content:center; align-items:flex-start; gap:38px; }
+  .col{ display:flex; flex-direction:column; align-items:center; gap:18px; }
+  .role{ display:flex; align-items:center; gap:12px; transition:opacity .5s ease; }
+  .role .chip{ display:inline-flex; align-items:center; gap:10px; padding:8px 20px 8px 13px; border-radius:999px;
+    background:rgba(240,230,210,.05); border:1px solid var(--nline); }
+  .role .dot{ width:13px; height:13px; border-radius:50%; background:#4A4230; transition:all .4s ease; }
+  .role .name{ font-size:22px; font-weight:700; letter-spacing:-.01em; color:var(--paper); }
+  .role .sub{ font-size:15px; color:var(--nsoft); font-weight:500; }
+  .col.idle .role{ opacity:.4; }
+  .col.live .role .dot{ background:var(--accent); box-shadow:0 0 0 5px rgba(181,64,44,.2); }
+
+  .phone{ width:392px; height:812px; border-radius:52px; padding:13px;
+    background:linear-gradient(155deg,#241d13,#0b0906);
+    box-shadow:0 40px 80px -20px rgba(0,0,0,.7), 0 0 0 2px rgba(240,230,210,.05) inset;
+    position:relative; transition:filter .6s ease, transform .55s cubic-bezier(.4,0,.2,1), box-shadow .6s ease; }
+  .col.idle .phone{ filter:grayscale(.5) brightness(.72); transform:scale(.965); }
+  .col.live .phone{ filter:none; transform:scale(1); box-shadow:0 40px 90px -18px rgba(0,0,0,.7), 0 0 0 2px rgba(181,64,44,.42) inset, 0 0 60px -6px rgba(181,64,44,.4); }
+  .screen{ position:relative; width:100%; height:100%; border-radius:40px; overflow:hidden; background:var(--paper); }
+  .screen.night{ background:linear-gradient(180deg,#211a11,#15100a); }
+  .island{ position:absolute; top:15px; left:50%; transform:translateX(-50%); width:104px; height:28px; background:#000; border-radius:16px; z-index:40; }
+  .sbar{ position:absolute; top:0; left:0; right:0; height:52px; display:flex; align-items:center; justify-content:space-between;
+    padding:18px 30px 0; font-size:15px; font-weight:700; z-index:30; color:var(--ink); }
+  .screen.night .sbar{ color:var(--paper); }
+  .sbar .r{ display:flex; align-items:center; gap:6px; font-family:var(--mono); }
+
+  /* ---- participant: attract ---- */
+  .p-attract{ position:absolute; inset:0; background:linear-gradient(180deg,#211a11,#15100a); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; color:var(--paper); }
+  .p-attract .wm2{ font-size:44px; font-weight:800; letter-spacing:-.03em; }
+  .p-attract .wm2 .co{ color:var(--accent); animation:colon 1.15s steps(1) infinite; }
+  .p-attract .msg{ font-size:19px; color:#B7A98E; font-weight:500; }
+  .p-attract .hand{ margin-top:8px; font-size:40px; opacity:.8; animation:bob 2s ease-in-out infinite; }
+  @keyframes bob{ 50%{ transform:translateY(-8px); } }
+
+  /* ---- form-ish views (paper) ---- */
+  .sheet{ position:absolute; inset:0; padding:76px 34px 34px; display:flex; flex-direction:column; }
+  .sheet .kick{ font-family:var(--mono); font-size:12px; letter-spacing:.2em; text-transform:uppercase; color:var(--soft); }
+  .sheet h3{ font-size:27px; font-weight:800; color:var(--ink); margin:8px 0 22px; letter-spacing:-.02em; }
+
+  .consent-row{ display:flex; align-items:flex-start; gap:14px; padding:16px 0; border-bottom:1px solid var(--line); font-size:19px; color:var(--ink); font-weight:600; line-height:1.5; word-break:keep-all; }
+  .cbox{ flex:0 0 auto; width:30px; height:30px; border-radius:8px; border:2px solid var(--line); display:flex; align-items:center; justify-content:center; color:#fff; transition:all .35s ease; }
+  .cbox.on{ background:var(--accent); border-color:var(--accent); }
+  .cbox svg{ width:18px; height:18px; opacity:0; transition:opacity .3s; }
+  .cbox.on svg{ opacity:1; }
+  .consent-go{ margin-top:auto; text-align:center; font-size:17px; font-weight:700; color:var(--accent); border-top:2px solid var(--ink); padding-top:16px; }
+
+  .q-item{ padding:14px 0; border-bottom:1px solid var(--line); transition:opacity .4s; }
+  .q-item.future{ opacity:.32; }
+  .q-item .q{ font-size:16px; color:var(--soft); font-weight:600; }
+  .q-item .a{ font-size:20px; color:var(--ink); font-weight:700; margin-top:5px; border-bottom:2px solid var(--accent); display:inline-block; padding-bottom:2px; word-break:keep-all; line-height:1.4; }
+  .q-item .a.slider{ display:flex; gap:8px; border:none; }
+  .q-item .a .pill{ font-size:15px; padding:5px 13px; border-radius:999px; background:var(--paper2); border:1px solid var(--line); color:var(--soft); font-weight:600; }
+  .q-item .a .pill.sel{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  .q-caret{ display:inline-block; width:2px; height:20px; background:var(--accent); margin-left:3px; vertical-align:-3px; animation:colon .8s steps(1) infinite; }
+
+  .rec{ position:absolute; inset:0; padding:80px 34px 40px; display:flex; flex-direction:column; align-items:center; }
+  .rec .kick{ font-family:var(--mono); font-size:12px; letter-spacing:.2em; text-transform:uppercase; color:var(--soft); }
+  .rec .read{ font-size:29px; font-weight:800; color:var(--ink); text-align:center; line-height:1.5; margin-top:22px; word-break:keep-all; letter-spacing:-.01em; }
+  .rec .cd{ font-family:var(--mono); font-size:44px; font-weight:700; color:var(--accent); margin-top:auto; }
+  .meter{ display:flex; align-items:flex-end; gap:5px; height:66px; margin:24px 0 14px; }
+  .meter i{ width:8px; border-radius:3px; background:var(--accent); }
+  .rec .micring{ width:96px; height:96px; border-radius:50%; margin-bottom:8px; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 38% 32%,#C7583F,var(--accent) 68%,#8f2f20); color:#fff; position:relative;
+    box-shadow:0 0 0 10px rgba(181,64,44,.14); }
+  .rec .micring svg{ width:40px; height:40px; }
+  .rec .micring .pr{ position:absolute; inset:0; border-radius:50%; border:3px solid rgba(181,64,44,.5); animation:ripple 2.1s ease-out infinite; }
+  @keyframes ripple{ 0%{ transform:scale(1); opacity:.7; } 100%{ transform:scale(1.5); opacity:0; } }
+
+  .plain{ position:absolute; inset:0; padding:96px 34px 40px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:14px; }
+  .plain .kick{ font-family:var(--mono); font-size:12px; letter-spacing:.2em; text-transform:uppercase; color:var(--soft); }
+  .plain .big{ font-size:24px; font-weight:800; color:var(--ink); line-height:1.45; word-break:keep-all; }
+  .plain .file{ font-family:var(--mono); font-size:17px; color:var(--accent); font-weight:700; background:var(--paper2); border:1px solid var(--line); border-radius:12px; padding:12px 18px; }
+  .plain .sub{ font-size:17px; color:var(--soft); font-weight:600; }
+  .anwave{ display:flex; align-items:center; gap:4px; height:60px; margin:6px 0; }
+  .anwave i{ width:5px; border-radius:3px; background:var(--accent); animation:wv 1s ease-in-out infinite; }
+  @keyframes wv{ 0%,100%{ height:8px; } 50%{ height:56px; } }
+  .playpill{ display:inline-flex; align-items:center; gap:10px; padding:12px 22px; border-radius:999px; background:var(--accent); color:#fff; font-weight:700; font-size:17px; }
+  .playpill svg{ width:18px; height:18px; }
+  .opt-row{ display:flex; gap:12px; margin-top:6px; }
+  .opt{ padding:13px 24px; border-radius:14px; border:2px solid var(--line); font-size:18px; font-weight:700; color:var(--ink); }
+  .opt.hot{ background:var(--accent); color:#fff; border-color:var(--accent); }
+
+  .doc{ position:absolute; inset:0; padding:76px 30px 34px; display:flex; flex-direction:column; }
+  .doc .kick{ font-family:var(--mono); font-size:12px; letter-spacing:.2em; text-transform:uppercase; color:var(--soft); }
+  .doc .film{ margin-top:12px; height:190px; border-radius:16px; background:linear-gradient(160deg,#3A3427,#221E16); position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+  .doc .film .sil{ width:90px; height:90px; border-radius:50%; background:radial-gradient(circle at 40% 35%,#5A5140,#2A2419); box-shadow:0 0 0 8px rgba(240,230,210,.05); }
+  .doc .film .pl{ position:absolute; bottom:12px; left:12px; width:40px; height:40px; border-radius:50%; background:rgba(240,230,210,.9); display:flex; align-items:center; justify-content:center; }
+  .doc .film .pl svg{ width:18px; height:18px; color:var(--ink); }
+  .doc h3{ font-size:24px; font-weight:800; color:var(--ink); margin:16px 0 6px; }
+  .doc ul{ list-style:none; display:flex; flex-direction:column; gap:11px; margin-top:6px; }
+  .doc li{ display:flex; align-items:center; gap:11px; font-size:18px; font-weight:600; color:var(--ink); }
+  .doc li .d{ width:8px; height:8px; border-radius:50%; background:var(--accent); flex:0 0 auto; }
+
+  @keyframes pop{ from{ transform:translateY(14px); opacity:0; } to{ opacity:1; } }
+
+  /* ---- participant: incoming call ---- */
+  .p-incoming{ position:absolute; inset:0; background:linear-gradient(180deg,#241d13,#140f09); display:flex; flex-direction:column; align-items:center; padding:118px 34px 52px; color:var(--paper); }
+  .p-incoming .lab{ font-family:var(--mono); font-size:13px; letter-spacing:.22em; text-transform:uppercase; color:var(--nsoft); }
+  .p-incoming .from{ font-size:33px; font-weight:800; margin-top:12px; letter-spacing:-.01em; text-align:center; word-break:keep-all; }
+  .p-incoming .note{ font-size:15px; color:#B7A98E; margin-top:12px; text-align:center; word-break:keep-all; line-height:1.5; }
+  .p-incoming .rings{ margin-top:40px; width:148px; height:148px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; position:relative;
+    background:radial-gradient(circle at 38% 32%,#C7583F,var(--accent) 66%,#8f2f20); }
+  .p-incoming .rings svg{ width:58px; height:58px; }
+  .p-incoming .rings .pr{ position:absolute; inset:0; border-radius:50%; border:3px solid rgba(181,64,44,.5); animation:ripple 1.8s ease-out infinite; }
+  .p-incoming .acts{ margin-top:auto; display:flex; gap:66px; }
+  .p-incoming .act{ display:flex; flex-direction:column; align-items:center; gap:11px; }
+  .p-incoming .btn{ width:74px; height:74px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; }
+  .p-incoming .btn svg{ width:33px; height:33px; }
+  .p-incoming .btn.ans{ background:#2E9E63; box-shadow:0 0 0 8px rgba(46,158,99,.15); animation:jiggle 1s ease-in-out infinite; }
+  .p-incoming .btn.dec{ background:#C7402C; }
+  .p-incoming .btn.dec svg{ transform:rotate(135deg); }
+  .p-incoming .act span{ font-size:14px; color:#B7A98E; font-weight:600; }
+  @keyframes jiggle{ 50%{ transform:scale(1.09) rotate(-4deg); } }
+
+  /* ---- participant: in-call screen ---- */
+  .incall{ position:absolute; inset:0; display:flex; flex-direction:column; background:var(--paper); }
+  .ic-head{ flex:0 0 auto; padding:58px 24px 16px; display:flex; flex-direction:column; align-items:center; gap:3px; background:var(--paper); border-bottom:1px solid var(--line); }
+  .ic-av{ width:64px; height:64px; border-radius:50%; background:var(--ink); color:var(--paper); display:flex; align-items:center; justify-content:center; font-size:25px; font-weight:800; margin-bottom:7px; }
+  .ic-name{ font-size:22px; font-weight:800; color:var(--ink); letter-spacing:-.01em; }
+  .ic-timer{ font-family:var(--mono); font-size:16px; color:var(--accent); font-weight:700; display:flex; align-items:center; gap:8px; margin-top:2px; }
+  .ic-timer i{ width:7px; height:7px; border-radius:50%; background:var(--accent); animation:colon 1.05s steps(1) infinite; }
+  .ic-caps{ flex:1 1 auto; overflow:hidden; padding:18px 24px 8px; display:flex; flex-direction:column; gap:14px; }
+  .ic-cap{ animation:pop .42s cubic-bezier(.2,.8,.2,1) both; }
+  .ic-cap .sp{ font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--soft); }
+  .ic-cap .tx{ font-size:18px; line-height:1.5; font-weight:600; color:var(--ink); word-break:keep-all; margin-top:3px; }
+  .ic-cap.them .sp{ color:var(--accent); }
+  .ic-cap.me .tx{ color:#7A6F5C; font-weight:500; }
+  .ic-controls{ flex:0 0 auto; padding:14px 30px 30px; display:flex; align-items:flex-start; justify-content:center; gap:30px; background:var(--paper); }
+  .ic-ctl{ display:flex; flex-direction:column; align-items:center; gap:7px; }
+  .ic-ctl .cb{ width:56px; height:56px; border-radius:50%; background:var(--paper2); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--ink); }
+  .ic-ctl .cb svg{ width:24px; height:24px; }
+  .ic-ctl .cl{ font-size:12px; color:var(--soft); font-weight:600; }
+  .ic-ctl.end .cb{ background:#C7402C; border:none; color:#fff; }
+  .ic-ctl.end .cb svg{ transform:rotate(135deg); }
+
+  /* ---- reflection card (participant end) ---- */
+  .refcard{ position:absolute; inset:0; background:linear-gradient(180deg,#211a11,#15100a); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; color:var(--paper); padding:40px; text-align:center; }
+  .refcard .lab{ font-family:var(--mono); font-size:13px; letter-spacing:.18em; color:var(--nsoft); text-transform:uppercase; }
+  .refcard .num{ font-size:92px; font-weight:800; color:var(--accent2); line-height:1; }
+  .refcard .cap2{ font-size:18px; color:#B7A98E; font-weight:500; word-break:keep-all; }
+  .refcard .echo{ margin-top:14px; font-size:22px; font-weight:700; color:var(--paper); opacity:.55; }
+
+  /* ---- clone phone (right, night) ---- */
+  .c-idle{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; color:var(--nsoft); }
+  .c-idle .lab{ font-family:var(--mono); font-size:13px; letter-spacing:.16em; text-transform:uppercase; }
+  .c-idle .q{ font-size:26px; font-weight:800; color:var(--ntext); }
+
+  .c-ring{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; color:var(--paper); }
+  .c-ring .lab{ font-family:var(--mono); font-size:14px; letter-spacing:.2em; text-transform:uppercase; color:var(--nsoft); }
+  .c-ring .from{ font-size:34px; font-weight:800; color:var(--paper); letter-spacing:-.01em; }
+  .c-ring .bell{ width:132px; height:132px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; margin-top:6px;
+    background:radial-gradient(circle at 38% 32%,#C7583F,var(--accent) 66%,#8f2f20); position:relative; animation:shake .9s ease-in-out infinite; }
+  .c-ring .bell svg{ width:56px; height:56px; }
+  .c-ring .bell .pr{ position:absolute; inset:0; border-radius:50%; border:3px solid rgba(181,64,44,.5); animation:ripple 1.6s ease-out infinite; }
+  @keyframes shake{ 0%,100%{ transform:rotate(-7deg); } 50%{ transform:rotate(7deg); } }
+
+  .c-call{ position:absolute; inset:0; display:flex; flex-direction:column; padding:66px 30px 40px; }
+  .c-call .chead{ display:flex; align-items:center; gap:12px; padding-bottom:20px; border-bottom:1px solid var(--nline); }
+  .c-call .cav{ width:52px; height:52px; border-radius:50%; flex:0 0 auto; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:800; color:#fff;
+    background:radial-gradient(circle at 38% 32%,#C7583F,var(--accent) 70%,#8f2f20); }
+  .c-call .cname{ font-size:23px; font-weight:800; color:var(--paper); letter-spacing:-.01em; }
+  .c-call .crel{ font-size:14px; color:var(--nsoft); font-weight:600; font-family:var(--mono); }
+  .c-call .quote{ flex:1 1 auto; display:flex; align-items:center; }
+  .c-call .quote p{ font-size:30px; font-weight:700; line-height:1.55; color:var(--paper); word-break:keep-all; letter-spacing:-.01em; animation:pop .5s cubic-bezier(.2,.8,.2,1) both; }
+  .c-call .qmark{ color:var(--accent2); font-size:40px; font-weight:800; }
+  .c-call .foot{ display:flex; align-items:center; justify-content:center; gap:12px; height:40px; }
+  .c-wave{ display:flex; align-items:center; gap:4px; height:32px; }
+  .c-wave i{ width:5px; border-radius:3px; background:var(--accent2); animation:wv .85s ease-in-out infinite; }
+  .c-listen{ font-family:var(--mono); font-size:14px; color:var(--nsoft); letter-spacing:.06em; }
+  .c-listen i{ display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--nsoft); margin-right:7px; animation:colon 1s steps(1) infinite; }
+
+  .c-end{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; padding:40px; text-align:center; }
+  .c-end.fade .txt{ font-size:24px; font-weight:700; color:var(--nsoft); animation:fadeout 3.6s ease forwards; }
+  @keyframes fadeout{ 0%{ opacity:.9; } 100%{ opacity:.12; } }
+  .c-end .cq{ font-size:27px; font-weight:800; color:var(--paper); line-height:1.5; word-break:keep-all; }
+  .c-end .copts{ display:flex; gap:14px; }
+  .c-end .copt{ padding:15px 28px; border-radius:14px; font-size:18px; font-weight:700; border:2px solid var(--nline); color:var(--ntext); }
+  .c-end .copt.hot{ background:var(--accent); color:#fff; border-color:var(--accent); }
+
+  .c-reveal{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:44px 34px; text-align:center; animation:pop .6s ease both; }
+  .c-reveal .film{ width:150px; height:150px; border-radius:50%; background:radial-gradient(circle at 40% 35%,#6A6046,#2A2419); box-shadow:0 0 0 10px rgba(181,64,44,.16); display:flex; align-items:flex-end; justify-content:center; overflow:hidden; }
+  .c-reveal .film .head{ width:74px; height:74px; border-radius:50% 50% 44% 44%; background:#C9BE9E; margin-bottom:-6px; }
+  .c-reveal .rn{ font-size:28px; font-weight:800; color:var(--paper); }
+  .c-reveal .rl{ font-size:18px; color:#C6B896; font-weight:500; line-height:1.55; word-break:keep-all; }
+  .c-reveal .rs{ font-family:var(--mono); font-size:15px; color:var(--accent2); font-weight:700; background:rgba(181,64,44,.12); border:1px solid rgba(181,64,44,.34); border-radius:12px; padding:11px 18px; }
+
+  /* ---------- orchestrator console ---------- */
+  .console{ width:508px; height:812px; display:flex; flex-direction:column; gap:14px; }
+  .oc-mod{ background:var(--ncard); backdrop-filter:blur(16px); border:1px solid var(--nline); border-radius:16px; padding:18px 20px; display:flex; flex-direction:column; transition:box-shadow .5s ease; }
+  .oc-mod.pulse-amber{ box-shadow:0 0 26px -8px rgba(192,138,56,.28); border-color:rgba(192,138,56,.24); }
+  .oc-mod.pulse-accent{ box-shadow:0 0 26px -8px rgba(181,64,44,.34); border-color:rgba(181,64,44,.3); }
+
+  .oc-badge{ display:inline-flex; align-items:center; gap:9px; padding:5px 13px; border-radius:999px; background:rgba(240,230,210,.04); border:1px solid var(--nline); font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.08em; color:var(--nsoft); align-self:center; }
+  .oc-dot{ width:8px; height:8px; border-radius:50%; background:#4A4230; transition:all .4s; }
+  .oc-dot.amber{ background:var(--amber); box-shadow:0 0 9px var(--amber); animation:colon 1s infinite alternate; }
+  .oc-dot.accent{ background:var(--accent2); box-shadow:0 0 9px var(--accent); animation:colon 1s infinite alternate; }
+  .oc-label{ font-size:25px; font-weight:800; color:var(--paper); text-align:center; margin-top:11px; letter-spacing:-.01em; }
+
+  .oc-cycle{ display:flex; justify-content:space-between; align-items:flex-start; position:relative; margin-top:16px; padding:0 6px; }
+  .oc-line{ position:absolute; left:44px; right:44px; top:19px; height:2px; background:rgba(240,230,210,.09); }
+  .oc-line .fill{ position:absolute; left:0; top:0; bottom:0; background:linear-gradient(90deg,var(--amber),var(--accent)); transition:width .6s ease; }
+  .oc-node{ position:relative; z-index:2; display:flex; flex-direction:column; align-items:center; gap:9px; width:80px; }
+  .oc-cdot{ width:38px; height:38px; border-radius:50%; background:#1B150D; border:1.5px solid #3A3220; display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:11px; font-weight:800; color:#5A5140; transition:all .4s; }
+  .oc-node.done .oc-cdot{ background:rgba(181,64,44,.22); border-color:var(--accent); color:var(--paper); }
+  .oc-node.active .oc-cdot{ background:var(--accent); border-color:var(--accent2); color:#fff; box-shadow:0 0 14px rgba(181,64,44,.5); transform:scale(1.12); }
+  .oc-clab{ font-size:13px; font-weight:700; color:#6A6048; transition:color .4s; text-align:center; }
+  .oc-node.active .oc-clab, .oc-node.done .oc-clab{ color:var(--ntext); }
+
+  .oc-chips{ display:flex; flex-wrap:wrap; gap:8px; }
+  .oc-chip{ display:flex; flex-direction:column; gap:2px; padding:8px 13px; border-radius:11px; background:rgba(240,230,210,.03); border:1px solid var(--nline); transition:all .35s; flex:1 1 auto; min-width:0; }
+  .oc-chip .cn{ font-family:var(--mono); font-size:10px; letter-spacing:.05em; color:#6A6048; text-transform:uppercase; }
+  .oc-chip .cv{ font-size:14px; font-weight:700; color:var(--nsoft); white-space:nowrap; }
+  .oc-chip.on{ background:rgba(181,64,44,.16); border-color:rgba(181,64,44,.5); box-shadow:0 0 14px -4px rgba(181,64,44,.5); }
+  .oc-chip.on .cn{ color:var(--accent2); }
+  .oc-chip.on .cv{ color:var(--paper); }
+
+  .oc-panel{ flex:1 1 auto; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
+  .oc-ptitle{ font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--nsoft); margin-bottom:12px; }
+  .oc-empty{ flex:1 1 auto; display:flex; align-items:center; justify-content:center; color:#5A5140; font-size:14px; font-style:italic; }
+
+  .persona{ display:flex; flex-direction:column; gap:10px; }
+  .persona .pname{ font-size:22px; font-weight:800; color:var(--paper); letter-spacing:-.01em; }
+  .persona .prow{ background:rgba(0,0,0,.18); border-radius:10px; padding:10px 13px; }
+  .persona .prow .k{ font-family:var(--mono); font-size:11px; color:#6A6048; text-transform:uppercase; letter-spacing:.05em; }
+  .persona .prow .v{ font-size:15px; color:var(--ntext); font-weight:600; margin-top:3px; line-height:1.45; word-break:keep-all; }
+  .persona .pmem{ display:flex; align-items:center; gap:8px; font-size:14px; color:var(--accent2); font-weight:700; }
+  .persona .pmem .b{ font-family:var(--mono); background:rgba(181,64,44,.14); border:1px solid rgba(181,64,44,.3); border-radius:8px; padding:3px 9px; }
+
+  .refscan{ display:flex; flex-direction:column; gap:12px; }
+  .spk{ background:rgba(240,230,210,.03); border:1px solid var(--nline); border-radius:12px; padding:13px 15px; transition:all .35s; }
+  .spk.sel{ background:rgba(181,64,44,.14); border-color:rgba(181,64,44,.5); }
+  .spk .top{ display:flex; align-items:center; justify-content:space-between; }
+  .spk .id{ font-size:17px; font-weight:800; color:var(--paper); }
+  .spk .who{ font-size:14px; color:var(--nsoft); font-weight:600; }
+  .spk .pick{ font-family:var(--mono); font-size:12px; font-weight:700; color:var(--accent2); }
+  .spk .bar{ margin-top:10px; height:7px; border-radius:4px; background:rgba(240,230,210,.08); overflow:hidden; }
+  .spk .bar i{ display:block; height:100%; background:linear-gradient(90deg,var(--amber),var(--accent)); border-radius:4px; }
+  .spk .meta{ display:flex; justify-content:space-between; margin-top:7px; font-family:var(--mono); font-size:12px; color:var(--nsoft); }
+
+  .twin{ display:flex; flex-direction:column; gap:9px; }
+  .twin .tr{ display:flex; align-items:center; justify-content:space-between; background:rgba(240,230,210,.03); border:1px solid var(--nline); border-radius:10px; padding:12px 15px; }
+  .twin .tr .tk{ font-size:15px; color:var(--nsoft); font-weight:600; }
+  .twin .tr .tv{ font-family:var(--mono); font-size:18px; font-weight:800; color:var(--paper); }
+  .twin .tr.hot{ background:rgba(181,64,44,.14); border-color:rgba(181,64,44,.4); }
+  .twin .tr.hot .tv{ color:var(--accent2); }
+
+  .turn{ display:flex; flex-direction:column; gap:14px; }
+  .turn .tname{ align-self:flex-start; font-family:var(--mono); font-size:12px; font-weight:700; color:var(--accent2); background:rgba(181,64,44,.12); border:1px solid rgba(181,64,44,.3); border-radius:8px; padding:5px 11px; }
+  .turn .steps{ display:flex; gap:8px; }
+  .turn .st{ flex:1; text-align:center; padding:14px 6px; border-radius:12px; background:rgba(240,230,210,.03); border:1px solid var(--nline); transition:all .35s; }
+  .turn .st .si{ font-size:20px; }
+  .turn .st .sl{ font-size:14px; font-weight:700; color:var(--nsoft); margin-top:5px; }
+  .turn .st .sm{ font-family:var(--mono); font-size:10px; color:#6A6048; margin-top:2px; }
+  .turn .st.on{ background:rgba(181,64,44,.16); border-color:rgba(181,64,44,.5); box-shadow:0 0 16px -5px rgba(181,64,44,.5); }
+  .turn .st.on .sl{ color:var(--paper); }
+  .turn .asrbox{ background:rgba(0,0,0,.2); border:1px dashed var(--nline); border-radius:10px; padding:11px 14px; }
+  .turn .asrbox .k{ font-family:var(--mono); font-size:11px; color:#6A6048; }
+  .turn .asrbox .v{ font-size:16px; color:var(--ntext); font-weight:600; margin-top:4px; }
+
+  /* terminal */
+  .term{ height:206px; flex:0 0 auto; background:rgba(8,6,3,.55); border:1px solid var(--nline); border-radius:14px; padding:14px 16px; overflow-y:auto; display:flex; flex-direction:column; gap:7px; }
+  .logline{ display:flex; align-items:flex-start; animation:pop .2s ease both; }
+  .logtime{ font-family:var(--mono); font-size:11px; color:#5A5140; margin-right:8px; margin-top:2px; flex:0 0 auto; }
+  .logtag{ font-family:var(--mono); font-size:10px; font-weight:800; padding:2.5px 7px; border-radius:6px; margin-right:8px; letter-spacing:.05em; flex:0 0 auto; margin-top:1px; }
+  .t-system{ color:#B7A98E; background:rgba(183,169,142,.1); }
+  .t-survey{ color:var(--amber); background:rgba(192,138,56,.12); }
+  .t-voice{ color:var(--accent2); background:rgba(181,64,44,.12); }
+  .t-asr{ color:#5AA0C4; background:rgba(90,160,196,.12); }
+  .t-llm{ color:#6FB58C; background:rgba(62,142,110,.14); }
+  .t-tts{ color:#C77FA0; background:rgba(199,127,160,.12); }
+  .t-memory{ color:#A98FD0; background:rgba(140,110,200,.14); }
+  .t-dissolve{ color:#8A7E6A; background:rgba(138,126,106,.12); }
+  .logtext{ font-size:12.5px; color:#C6B896; line-height:1.5; word-break:break-all; font-family:var(--mono); }
+
+  .term::-webkit-scrollbar,.caps::-webkit-scrollbar{ width:5px; }
+  .term::-webkit-scrollbar-thumb{ background:rgba(240,230,210,.14); border-radius:3px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo } = React;
+
+/* ---------- icons ---------- */
+const IChk=()=>(<svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.2 4.3L19 7" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+const IMic=()=>(<svg viewBox="0 0 24 24" fill="none"><rect x="9" y="2.5" width="6" height="11.5" rx="3" fill="currentColor"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0" stroke="currentColor" strokeWidth="2.1" fill="none" strokeLinecap="round"/><line x1="12" y1="17.5" x2="12" y2="21.5" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round"/></svg>);
+const IBell=()=>(<svg viewBox="0 0 24 24" fill="none"><path d="M12 3a5 5 0 0 0-5 5c0 4-1.6 5.6-2.2 6.4-.3.4 0 1.1.5 1.1h13.4c.5 0 .8-.7.5-1.1C18.6 13.6 17 12 17 8a5 5 0 0 0-5-5Z" fill="currentColor"/><path d="M10 19a2 2 0 0 0 4 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>);
+const IPlay=()=>(<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7V5z"/></svg>);
+const IPause=()=>(<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg>);
+const IRestart=()=>(<svg viewBox="0 0 24 24" fill="none"><path d="M5 12a7 7 0 1 0 2.1-5M5 4v4h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>);
+const IPhone=()=>(<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8c1.4 2.8 3.8 5.2 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.4 0 .8-.3 1.1L6.6 10.8Z"/></svg>);
+const IMuteIcon=()=>(<svg viewBox="0 0 24 24" fill="none"><rect x="9" y="3" width="6" height="10" rx="3" fill="currentColor"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/><line x1="4" y1="3.5" x2="20" y2="20.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>);
+const ISpk=()=>(<svg viewBox="0 0 24 24" fill="none"><path d="M4 9v6h4l5 4V5L8 9H4Z" fill="currentColor"/><path d="M16.5 9a4 4 0 0 1 0 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>);
+
+/* ---------- frame builder context ---------- */
+function ctx(cfg){
+  const F=[], logs=[];
+  const clk=new Date(2026,10,22,14,0,0);
+  const log=(tag,text)=>{ clk.setSeconds(clk.getSeconds()+(2+F.length%4)); logs.push({time:clk.toTimeString().slice(0,8),tag,text}); };
+  const S={
+    scene:'', speaking:null,
+    left:{mode:'attract'}, right:{mode:'idle', name:cfg.name||'???', revealed:!cfg.hidden, line:null, end:null, reveal:null},
+    captions:[],
+    status:'STANDBY', label:'대기 중', cycleIdx:-1,
+    chips:{survey:0,voice:0,asr:0,llm:0,tts:0,mem:0},
+    panel:null,
+  };
+  const ch=(...on)=>{ for(const k in S.chips) S.chips[k]= on.indexOf(k)>=0?1:0; };
+  const say=(who,text)=>{ S.captions.push({who,text}); if(who==='상대') S.right.line=text; };
+  const push=(dur)=>{
+    const snap=JSON.parse(JSON.stringify({
+      scene:S.scene, speaking:S.speaking, left:S.left, right:S.right, captions:S.captions,
+      status:S.status, label:S.label, cycleIdx:S.cycleIdx, chips:S.chips, panel:S.panel, logs
+    }));
+    snap.dur=dur; snap.idx=F.length; F.push(snap);
+  };
+  return {S, F, log, ch, say, push, cfg};
+}
+
+/* ---------- ① ECHO ---------- */
+function buildEcho(){
+  const c=ctx({name:'10년 뒤의 나'}); const {S,push,log,ch,say}=c;
+  S.scene='대기'; push(2200);
+  S.scene='동의'; S.left={mode:'consent', consent:{items:['이 체험은 내 목소리로 통화를 만듭니다','녹음·통화는 이 방을 떠나지 않습니다','끝나면 즉시 삭제됩니다'], checked:0}};
+  S.status='ORCH'; S.label='세션 시작'; log('system','세션 시작 · 참가자 착석'); push(1700);
+  S.left.consent.checked=3; log('system','동의 확인 · 개인정보 비영속 모드'); push(1600);
+  S.scene='설문'; S.cycleIdx=0; S.status='ORCH'; S.label='설문 6문항'; ch('survey');
+  S.left={mode:'survey', survey:{items:[
+    {q:'요즘 가장 큰 고민', a:null}, {q:'10년 뒤 나는 어디서 무엇을', a:null},
+    {q:'가장 아끼는 사람', a:null}, {q:'성격', slider:['내향','즉흥'], a:null},
+    {q:'요즘 나를 웃게 한 것', a:null}, {q:'10년 뒤 나에게 한마디', a:null},
+  ], cur:0}};
+  log('survey','설문 세션 시작'); push(1400);
+  S.left.survey.items[0].a='졸업하고 뭘 해야 할지 모르겠어';
+  S.left.survey.items[1].a='어딘가 내 작업실 하나 갖고 있으면'; S.left.survey.cur=2; push(1600);
+  S.left.survey.items[2].a='동생'; S.left.survey.items[3].a='slider';
+  S.left.survey.items[4].a='길에서 만난 고양이'; S.left.survey.cur=5; log('survey','가치관·성격 축 파싱'); push(1600);
+  S.left.survey.items[5].a='그때도 하고 싶은 거 하면서 살아?'; S.left.survey.cur=6; log('survey','앵커 6문항 수신 완료'); push(1400);
+  S.scene='페르소나 생성'; S.status='ORCH'; S.label='페르소나 시드 생성'; ch('survey');
+  S.panel={kind:'persona', name:'스물일곱의 나', personality:'내향적이고 즉흥적', background:'졸업과 진로를 앞두고 매일 고민한다', hello:'여보세요, 나야. 잘 지냈어?', mem:4};
+  log('llm','설문 → 캐릭터 카드 생성(LLM 불필요·순수 템플릿)'); log('memory','기억 시드 4건 · 동생 / 고양이 / 작업실 / 진로'); push(2700);
+  S.scene='목소리 녹음'; S.cycleIdx=1; S.status='ORCH'; S.label='목소리 세팅'; ch('voice');
+  S.left={mode:'record', record:{line:'여보세요, 나야.\n잘 지냈어?', cd:'00:10', level:.25}};
+  log('voice','수화기 낭독 10초 수신'); push(1500);
+  S.left.record.cd='00:04'; S.left.record.level=.85; log('voice','ref_text 기지 → 전사 생략 · 텍스트-오디오 정합 100%'); push(1700);
+  S.left.record.cd='00:00'; S.left.record.level=.15; S.panel={kind:'wave', label:'제로샷 화자 임베딩 추출'};
+  log('voice','제로샷 화자 임베딩 추출 · CosyVoice3 ref 세팅'); push(1700);
+  S.scene='연결'; S.status='ORCH'; S.label='연결 준비'; ch('tts');
+  S.left={mode:'plain', plain:{kind:'wait', big:'전화가 곧 울립니다', sub:'수화기를 들면 통화가 시작됩니다'}};
+  log('system','합성 워밍업 완료'); push(1300);
+  S.scene='벨'; S.status='ORCH'; S.label='발신 · 벨 3회'; S.left={mode:'incoming', incoming:{from:'10년 뒤의 나'}}; S.right={...S.right, mode:'ring', revealed:true};
+  log('system','벨 신호 · 3회 후 자동 수신'); push(2100);
+  S.scene='통화'; S.cycleIdx=2; S.status='CALL'; S.label='통화 중'; S.left={mode:'call'};
+  S.right={...S.right, mode:'call', revealed:true}; S.speaking='clone'; ch('llm','tts');
+  say('상대','여보세요… 나야. 목소리 들으니까 이상하다. 스물일곱의 나 맞지?');
+  S.panel={kind:'turn', step:'말하기', name:'스물일곱의 나'}; log('llm','첫 인사 생성 · first_message'); log('tts','CosyVoice3 스트리밍 출력'); push(2700);
+  S.speaking='me'; ch('asr'); say('나','어… 응. 진짜 나야?'); S.panel={kind:'turn', step:'듣기', name:'스물일곱의 나', asr:'어… 응. 진짜 나야?'};
+  log('asr','Qwen3-ASR 인식: "진짜 나야?"'); push(1900);
+  S.speaking='clone'; ch('llm','tts'); say('상대','그래, 10년 뒤의 나. 너 요즘 졸업하고 뭐 할지 몰라서 고민 많지.');
+  S.panel={kind:'turn', step:'생각', name:'스물일곱의 나', asr:'진짜 나야?'}; log('memory','기억 회상: 진로 고민'); log('llm','응답 생성'); push(2600);
+  S.speaking='me'; ch('asr'); say('나','어떻게 알았어… 그거 진짜 매일 생각해.'); S.panel={kind:'turn', step:'듣기', name:'스물일곱의 나', asr:'매일 생각해'};
+  log('asr','인식: "매일 생각해"'); push(1800);
+  S.speaking='clone'; ch('llm','tts'); say('상대','알아. 나도 거기서 왔으니까. 그 고민, 답이 딱 나오진 않아. 그냥 하다 보면 어느새 여기 와 있어.');
+  S.panel={kind:'turn', step:'말하기', name:'스물일곱의 나'}; log('llm','응답 생성 · 위로 톤'); log('tts','스트리밍 출력'); push(2900);
+  S.speaking='me'; ch('asr'); say('나','작업실은? 나 작업실 갖고 싶었는데.'); S.panel={kind:'turn', step:'듣기', name:'스물일곱의 나', asr:'작업실 갖고 싶었는데'};
+  log('asr','인식: "작업실 갖고 싶었는데"'); push(1900);
+  S.speaking='clone'; ch('llm','tts'); say('상대','갖고 있어. 크진 않은데 내 거야. 고양이도 한 마리 있어. 너 길에서 고양이 보고 웃었다며. 그거 계속 웃고 살아.');
+  S.panel={kind:'turn', step:'말하기', name:'스물일곱의 나'}; log('memory','회상: 고양이 · 작업실'); log('tts','스트리밍 출력'); push(3000);
+  S.scene='작별'; S.status='CALL'; S.label='작별'; S.speaking='clone'; ch('llm','tts');
+  say('상대','아 맞다. 너 나한테 물어봤잖아. "그때도 하고 싶은 거 하면서 사냐"고.');
+  S.panel={kind:'turn', step:'말하기', name:'스물일곱의 나'}; log('llm','farewell + 부메랑 주입(6번 답)'); push(2700);
+  say('상대','…응. 하고 있어. 그러니까 너도, 지금 그거 놓지 마. 끊을게. 잘 지내, 나야.');
+  log('tts','마지막 출력'); push(3000);
+  S.scene='소멸'; S.cycleIdx=3; S.status='STANDBY'; S.label='소멸'; S.speaking=null; ch();
+  S.left={mode:'card', card:{lab:'오늘 태어나고 사라진 목소리', num:38, cap:'통화는 저장되지 않았습니다', echo:'여보세요, 나야.'}};
+  S.right={...S.right, mode:'end', end:{kind:'fade', text:'통화가 끝났습니다'}}; S.panel=null;
+  log('dissolve','세션 종료 · 메모리 폐기(디스크 기록 0)'); log('system','카운터 +1 · 대기 복귀'); push(4400);
+  return c.F;
+}
+
+/* ---------- ② PORTRAIT ---------- */
+function buildPortrait(){
+  const c=ctx({name:'할머니'}); const {S,push,log,ch,say}=c;
+  S.scene='접수'; S.status='ORCH'; S.label='파일 수신';
+  S.left={mode:'plain', plain:{kind:'file', kick:'예약 접수', big:'김○○ 님 · 15:00', file:'할머니_통화.m4a', sub:'QR → 로컬 Wi-Fi 업로드'}};
+  log('system','예약 확인 · 파일 수신(할머니_통화.m4a)'); push(2400);
+  S.scene='분석'; S.cycleIdx=0; S.status='ORCH'; S.label='화자 분리·분석'; ch('voice');
+  S.left={mode:'plain', plain:{kind:'analyze', big:'목소리를 찾고 있습니다', sub:'화자 분리 · 최적 구간 추출'}};
+  S.panel={kind:'refscan', speakers:[{id:'A', who:'나(본인)', snr:.6, len:'다수', sel:false},{id:'B', who:'상대 목소리', snr:.92, len:'8.4s', sel:false}], picked:null};
+  log('voice','화자분리 2인 검출'); push(2500);
+  S.panel.speakers[1].sel=true; S.panel.picked='B'; log('voice','화자 B ref 후보 8.4s · SNR 우수 · 6~12s 창 선택'); push(2200);
+  S.scene='목소리 선택'; S.status='ORCH'; S.label='ref 확정';
+  S.left={mode:'plain', plain:{kind:'pick', big:'이 목소리가\n그 사람인가요?', play:true}};
+  log('system','참가자 샘플 청취 · ref 확정'); push(2400);
+  S.scene='관계 설문'; S.cycleIdx=1; S.status='ORCH'; S.label='관계 설문 → 기억'; ch('survey','mem');
+  S.left={mode:'survey', survey:{items:[
+    {q:'서로 부르던 호칭', a:'할머니 → 우리 강아지'},
+    {q:'그 사람 말버릇', a:'밥은 먹었냐'},
+    {q:'함께한 기억', a:'여름 평상 · 손잡고 시장'},
+    {q:'마지막 나눈 대화', a:'전화로 김장 얘기'},
+    {q:'나를 놀리던 방식', a:'어릴 때 울보였다고'},
+  ], cur:5}};
+  S.panel={kind:'persona', name:'할머니', personality:'무뚝뚝하지만 다정 · "밥은 먹었냐"', background:'여름 평상 · 시장 · 김장의 기억', hello:'여보세요? 우리 강아지냐?', mem:14};
+  log('memory','전사 기억 자동 추출 12건(memory_update)'); log('survey','관계 설문 → 기억 병합(총 14건)'); push(3200);
+  S.scene='벨'; S.status='ORCH'; S.label='연결'; S.left={mode:'incoming', incoming:{from:'할머니'}}; S.right={...S.right, mode:'ring', revealed:true}; push(1900);
+  S.scene='통화'; S.cycleIdx=2; S.status='CALL'; S.label='통화 중'; S.left={mode:'call'};
+  S.right={...S.right, mode:'call'}; S.speaking='clone'; ch('llm','tts');
+  say('상대','여보세요? …우리 강아지냐?'); S.panel={kind:'turn', step:'말하기', name:'할머니'}; log('tts','CosyVoice3 스트리밍(할머니 음색)'); push(2500);
+  S.speaking='me'; ch('asr'); say('나','…할머니?'); S.panel={kind:'turn', step:'듣기', name:'할머니', asr:'할머니?'}; log('asr','인식: "할머니?"'); push(1800);
+  S.speaking='clone'; ch('llm','tts'); say('상대','그래, 나다. 밥은 먹었냐. 목소리가 반쪽이네.');
+  S.panel={kind:'turn', step:'생각', name:'할머니', asr:'할머니?'}; log('memory','회상: 말버릇 "밥은 먹었냐"'); log('llm','응답 생성'); push(2600);
+  S.speaking='me'; ch('asr'); say('나','할머니 목소리… 진짜 똑같다.'); S.panel={kind:'turn', step:'듣기', name:'할머니', asr:'진짜 똑같다'}; log('asr','인식: "진짜 똑같다"'); push(1900);
+  S.speaking='clone'; ch('llm','tts'); say('상대','똑같긴. 마당 평상 생각나냐? 너 거기서 여름마다 뒹굴었잖아.');
+  S.panel={kind:'turn', step:'말하기', name:'할머니'}; log('memory','회상: 여름 평상'); push(2800);
+  S.speaking='me'; ch('asr'); say('나','기억나지. 할머니가 수박 잘라줬잖아.'); S.panel={kind:'turn', step:'듣기', name:'할머니', asr:'수박 잘라줬잖아'}; log('asr','인식: "수박 잘라줬잖아"'); push(2000);
+  S.speaking='clone'; ch('llm','tts'); say('상대','그래. 넌 어릴 때 울보였어. 시장에서 길 잃었다고 엉엉 울고. 김장은 했냐?');
+  S.panel={kind:'turn', step:'말하기', name:'할머니'}; log('memory','회상: 놀리던 방식 · 김장'); push(3000);
+  S.speaking='me'; ch('asr'); say('나','아직… 이번 주말에 하려고.'); S.panel={kind:'turn', step:'듣기', name:'할머니', asr:'이번 주말에'}; log('asr','인식: "이번 주말에"'); push(1800);
+  S.speaking='clone'; ch('llm','tts'); say('상대','그래. 잘 먹고 다녀. 밥 굶지 말고.'); S.panel={kind:'turn', step:'말하기', name:'할머니'}; log('tts','출력'); push(2600);
+  S.scene='선택의 순간'; S.cycleIdx=3; S.status='ORCH'; S.label='선택'; S.speaking=null; ch();
+  S.right={...S.right, mode:'end', end:{kind:'choice', q:'이 목소리를\n가져가시겠습니까?', opts:['소멸','USB로 반출']}}; S.panel=null;
+  log('system','선택 대기 · 우리 쪽 보관 0(어느 쪽이든)'); push(4200);
+  return c.F;
+}
+
+/* ---------- ③ TWIN ---------- */
+function buildTwin(){
+  const c=ctx({name:'???', hidden:true}); const {S,push,log,ch,say}=c;
+  S.scene='다큐'; S.status='ORCH'; S.label='사전 제작 사례';
+  S.left={mode:'doc', doc:{kick:'TWIN · 협력자 사례', title:'협력자 · 준호', stats:['일상 녹음 42시간','심층 인터뷰 2시간','LoRA 말투 튜닝','기억 1,240건']}};
+  log('system','TWIN 사례 로드 · 준호 클론'); push(2900);
+  S.panel={kind:'twin', rows:[['일상 녹음','42h'],['심층 인터뷰','2h'],['말투 튜닝','LoRA'],['기억 RAG','1,240'],['지인 오인율','44%']]}; push(2400);
+  S.scene='블라인드'; S.status='ORCH'; S.label='블라인드 연결';
+  S.left={mode:'incoming', incoming:{from:'알 수 없는 번호', note:'상대가 사람인지 AI인지 모릅니다 · 3분간 자유롭게'}};
+  S.right={...S.right, mode:'ring', revealed:false}; log('system','블라인드 통화 · 신원 비공개'); push(2300);
+  S.scene='통화'; S.cycleIdx=2; S.status='CALL'; S.label='통화 중'; S.left={mode:'call'};
+  S.right={...S.right, mode:'call', revealed:false, name:'???'}; S.speaking='clone'; ch('llm','tts');
+  say('상대','여보세요, 안녕하세요. 연결됐네요.'); S.panel={kind:'turn', step:'말하기', name:'???'}; log('tts','CosyVoice3 스트리밍'); push(2300);
+  S.speaking='me'; ch('asr'); say('나','아, 네 안녕하세요. 뭘 물어보면 되죠?'); S.panel={kind:'turn', step:'듣기', name:'???', asr:'뭘 물어보면 되죠?'}; log('asr','인식: "뭘 물어보면 되죠?"'); push(1900);
+  S.speaking='clone'; ch('llm','tts'); say('상대','아무거나요, 편하게. 저 오늘 아침에 커피 내리다 유리잔 깨먹었어요. 시작이 좀 그랬죠.');
+  S.panel={kind:'turn', step:'생각', name:'???', asr:'뭘 물어보면 되죠?'}; log('memory','회상: 성격 · 덜렁댐'); log('llm','응답 생성'); push(2800);
+  S.speaking='me'; ch('asr'); say('나','하하 저런. 자주 그러세요?'); S.panel={kind:'turn', step:'듣기', name:'???', asr:'자주 그러세요?'}; log('asr','인식: "자주 그러세요?"'); push(1800);
+  S.speaking='clone'; ch('llm','tts'); say('상대','덜렁대는 편이에요. 어릴 때부터 그랬대요. 근데 그쪽은요? 전시 어때요?');
+  S.panel={kind:'turn', step:'말하기', name:'???'}; log('llm','되물음 생성 · 자연스러운 화제 전환'); push(2700);
+  S.speaking='me'; ch('asr'); say('나','신기해요. 근데 이게 사람인지 아닌지 모르겠어서.'); S.panel={kind:'turn', step:'듣기', name:'???', asr:'사람인지 아닌지'}; log('asr','인식: "사람인지 아닌지"'); push(2000);
+  S.speaking='clone'; ch('llm','tts'); say('상대','하하, 그 얘기 많이 들어요. 제가 사람 같아요, 아니면 좀 이상해요?');
+  S.panel={kind:'turn', step:'말하기', name:'???'}; log('llm','응답 생성'); push(2600);
+  S.speaking='me'; ch('asr'); say('나','너무 자연스러운데요. 말 끊는 것도 그렇고.'); S.panel={kind:'turn', step:'듣기', name:'???', asr:'너무 자연스러운데'}; log('asr','인식: "너무 자연스러운데"'); push(1900);
+  S.speaking='clone'; ch('llm','tts'); say('상대','다행이네요. 저는 그냥 전데. …아, 시간이 다 됐대요. 재밌었어요.');
+  S.panel={kind:'turn', step:'말하기', name:'???'}; log('tts','마지막 출력'); push(2700);
+  S.scene='질문'; S.cycleIdx=3; S.status='ORCH'; S.label='블라인드 질문'; S.speaking=null; ch();
+  S.left={mode:'plain', plain:{kind:'question', big:'방금 상대는\n사람이었을까요?', opts:['사람','AI']}};
+  S.right={...S.right, mode:'end', end:{kind:'fade', text:'통화 종료'}}; S.panel=null; log('system','블라인드 질문 제시'); push(3200);
+  S.scene='리빌'; S.status='STANDBY'; S.label='리빌';
+  S.right={...S.right, mode:'reveal', revealed:true, reveal:{name:'준호', line:'안녕하세요, 진짜 준호입니다.\n방금 그건 제 목소리로 만든 클론이었어요.', stat:'지인 44%가 저인 줄 알았습니다 (IMPersona, 2025)'}};
+  log('system','리빌 · 실제 인물 공개'); push(4800);
+  return c.F;
+}
+
+function fmtT(ms){ const s=Math.floor(ms/1000); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
+function withTimer(F){ let t=0; for(const f of F){ if(f.left && f.left.mode==='call'){ f.callTime=fmtT(t); t+=f.dur; } } return F; }
+
+const CASES=[
+  {key:'echo', en:'ECHO', ko:'메아리', pName:'참가자', pSub:'현장 워크인', cName:'10년 뒤의 나', cSub:'제로샷 클론', cycle:['설문','목소리','통화','여운'], frames:withTimer(buildEcho())},
+  {key:'portrait', en:'PORTRAIT', ko:'음성 초상', pName:'참가자', pSub:'예약 · 녹음 지참', cName:'소중한 사람', cSub:'화자분리 → ref', cycle:['분석','목소리','통화','선택'], frames:withTimer(buildPortrait())},
+  {key:'twin', en:'TWIN', ko:'쌍둥이', pName:'관람객', pSub:'블라인드 체험', cName:'협력자의 클론', cSub:'LoRA + 기억 풀', cycle:['학습','목소리','통화','리빌'], frames:withTimer(buildTwin())},
+];
+
+/* ---------- small pieces ---------- */
+function StatusBar({time, dark}){
+  return (
+    <div className={"sbar"+(dark?"":"")}>
+      <span>{time}</span>
+      <span className="r">call:one</span>
+    </div>
+  );
+}
+function Meter({level}){
+  const bars=Array.from({length:13});
+  return <div className="meter">{bars.map((_,i)=>{
+    const d=Math.abs(i-6)/6; const h=Math.max(8, (level*66)*(1-d*0.7)*(0.6+0.4*Math.sin(i*1.7)));
+    return <i key={i} style={{height:h+'px'}}/>;
+  })}</div>;
+}
+function Wave({cls}){ return <span className={cls}>{[0,1,2,3,4].map(i=><i key={i} style={{animationDelay:(i*0.12)+'s'}}/>)}</span>; }
+
+/* ---------- participant phone (left) ---------- */
+function ParticipantPhone({f, live, cfg}){
+  const L=f.left, sc=useRef(null);
+  useEffect(()=>{ if(sc.current) sc.current.scrollTop=sc.current.scrollHeight; });
+  const dark = L.mode==='attract' || L.mode==='card';
+  return (
+    <div className={"col "+(live?'live':'idle')}>
+      <div className="role"><span className="chip"><span className="dot"/><span className="name">{cfg.pName}</span></span><span className="sub">{cfg.pSub}</span></div>
+      <div className="phone"><div className={"screen"+(dark?' night':'')}>
+        <div className="island"/><StatusBar time="14:07"/>
+        {L.mode==='attract' && (
+          <div className="p-attract"><div className="wm2">call<span className="co">:</span>one</div><div className="msg">수화기를 들어 주세요</div><div className="hand">☎</div></div>
+        )}
+        {L.mode==='consent' && (
+          <div className="sheet"><div className="kick">Consent</div><h3>동의</h3>
+            {L.consent.items.map((t,i)=>(
+              <div className="consent-row" key={i}><span className={"cbox"+(i<L.consent.checked?' on':'')}><IChk/></span>{t}</div>
+            ))}
+            {L.consent.checked>=3 && <div className="consent-go">확인 · 시작합니다</div>}
+          </div>
+        )}
+        {L.mode==='survey' && (
+          <div className="sheet"><div className="kick">Survey</div><h3>{cfg.key==='portrait'?'관계 설문':'설문'}</h3>
+            {L.survey.items.map((it,i)=>(
+              <div className={"q-item"+(i>L.survey.cur?' future':'')} key={i}>
+                <div className="q">{i+1}. {it.q}</div>
+                {it.slider ? (i<=L.survey.cur && it.a &&
+                  <div className="a slider">{it.slider.map((s,k)=><span className="pill sel" key={k}>{s}</span>)}</div>
+                ) : (i<=L.survey.cur && it.a && <div className="a">{it.a}{i===L.survey.cur&&<span className="q-caret"/>}</div>)}
+              </div>
+            ))}
+          </div>
+        )}
+        {L.mode==='record' && (
+          <div className="rec"><div className="kick">Voice · 10s</div>
+            <div className="read">{L.record.line.split('\n').map((s,i)=><div key={i}>{s}</div>)}</div>
+            <Meter level={L.record.level}/>
+            <div className="micring"><span className="pr"/><IMic/></div>
+            <div className="cd">{L.record.cd}</div>
+          </div>
+        )}
+        {L.mode==='plain' && (
+          <div className="plain">
+            {L.plain.kick && <div className="kick">{L.plain.kick}</div>}
+            {L.plain.kind==='analyze' && <div className="anwave">{Array.from({length:11}).map((_,i)=><i key={i} style={{animationDelay:(i*0.09)+'s'}}/>)}</div>}
+            <div className="big">{L.plain.big.split('\n').map((s,i)=><div key={i}>{s}</div>)}</div>
+            {L.plain.file && <div className="file">{L.plain.file}</div>}
+            {L.plain.play && <div className="playpill"><IPlay/> 샘플 듣기</div>}
+            {L.plain.sub && <div className="sub">{L.plain.sub}</div>}
+            {L.plain.opts && <div className="opt-row">{L.plain.opts.map((o,i)=><span className={"opt"+(i===0?' hot':'')} key={i}>{o}</span>)}</div>}
+          </div>
+        )}
+        {L.mode==='doc' && (
+          <div className="doc"><div className="kick">{L.doc.kick}</div>
+            <div className="film"><div className="sil"/><div className="pl"><IPlay/></div></div>
+            <h3>{L.doc.title}</h3>
+            <ul>{L.doc.stats.map((s,i)=><li key={i}><span className="d"/>{s}</li>)}</ul>
+          </div>
+        )}
+        {L.mode==='incoming' && (
+          <div className="p-incoming">
+            <div className="lab">{L.incoming.from==='알 수 없는 번호'?'수신 전화':'전화가 왔습니다'}</div>
+            <div className="from">{L.incoming.from}</div>
+            {L.incoming.note && <div className="note">{L.incoming.note}</div>}
+            <div className="rings"><span className="pr"/><IPhone/></div>
+            <div className="acts">
+              <div className="act"><span className="btn dec"><IPhone/></span><span>거절</span></div>
+              <div className="act"><span className="btn ans"><IPhone/></span><span>받기</span></div>
+            </div>
+          </div>
+        )}
+        {L.mode==='call' && (
+          <div className="incall">
+            <div className="ic-head">
+              <div className="ic-av">{/할머니/.test(f.right.name)?'할':/나/.test(f.right.name)?'나':'?'}</div>
+              <div className="ic-name">{f.right.name}</div>
+              <div className="ic-timer"><i/>{f.callTime||'00:00'}</div>
+            </div>
+            <div className="ic-caps" ref={sc}>
+              {f.captions.map((cp,i)=>(
+                <div className={"ic-cap "+(cp.who==='나'?'me':'them')} key={i}>
+                  <div className="sp">{cp.who==='나'?'나':f.right.name}</div>
+                  <div className="tx">{cp.text}</div>
+                </div>
+              ))}
+              <div style={{height:12,flex:'0 0 auto'}}/>
+            </div>
+            <div className="ic-controls">
+              <div className="ic-ctl"><span className="cb"><IMuteIcon/></span><span className="cl">음소거</span></div>
+              <div className="ic-ctl"><span className="cb"><ISpk/></span><span className="cl">스피커</span></div>
+              <div className="ic-ctl end"><span className="cb"><IPhone/></span><span className="cl">종료</span></div>
+            </div>
+          </div>
+        )}
+        {L.mode==='card' && (
+          <div className="refcard"><div className="lab">{L.card.lab}</div><div className="num">{L.card.num}</div>
+            <div className="cap2">{L.card.cap}</div><div className="echo">“{L.card.echo}”</div></div>
+        )}
+      </div></div>
+    </div>
+  );
+}
+
+/* ---------- clone phone (right) ---------- */
+function ClonePhone({f, live, cfg}){
+  const R=f.right;
+  return (
+    <div className={"col "+(live?'live':'idle')}>
+      <div className="role"><span className="chip"><span className="dot"/><span className="name">{cfg.cName}</span></span><span className="sub">{cfg.cSub}</span></div>
+      <div className="phone"><div className="screen night">
+        <div className="island"/><StatusBar time="14:07" dark/>
+        {R.mode==='idle' && (<div className="c-idle"><div className="lab">Standby</div><div className="q">연결 준비 중</div></div>)}
+        {R.mode==='ring' && (
+          <div className="c-ring"><div className="lab">Incoming</div>
+            <div className="from">{R.revealed? R.name : '알 수 없는 번호'}</div>
+            <div className="bell"><span className="pr"/><IBell/></div>
+          </div>
+        )}
+        {R.mode==='call' && (
+          <div className="c-call">
+            <div className="chead"><span className="cav">{R.revealed? (R.name==='할머니'?'할':'나') : '?'}</span>
+              <div><div className="cname">{R.name}</div><div className="crel">{f.speaking==='clone'?'말하는 중':'듣는 중'}</div></div>
+            </div>
+            <div className="quote"><p><span className="qmark">“</span>{R.line}</p></div>
+            <div className="foot">
+              {f.speaking==='clone' ? <Wave cls="c-wave"/> : <span className="c-listen"><i/>당신의 말을 듣고 있습니다</span>}
+            </div>
+          </div>
+        )}
+        {R.mode==='end' && R.end.kind==='fade' && (<div className="c-end fade"><div className="txt">{R.end.text}</div></div>)}
+        {R.mode==='end' && R.end.kind==='choice' && (
+          <div className="c-end"><div className="cq">{R.end.q.split('\n').map((s,i)=><div key={i}>{s}</div>)}</div>
+            <div className="copts">{R.end.opts.map((o,i)=><span className={"copt"+(i===1?' hot':'')} key={i}>{o}</span>)}</div>
+          </div>
+        )}
+        {R.mode==='reveal' && (
+          <div className="c-reveal"><div className="film"><div className="head"/></div>
+            <div className="rn">{R.reveal.name}</div>
+            <div className="rl">{R.reveal.line.split('\n').map((s,i)=><div key={i}>{s}</div>)}</div>
+            <div className="rs">{R.reveal.stat}</div>
+          </div>
+        )}
+      </div></div>
+    </div>
+  );
+}
+
+/* ---------- orchestrator console ---------- */
+const CHIPS=[['survey','설문','페르소나'],['voice','목소리','화자·ref'],['asr','ASR','Qwen3'],['llm','LLM','EXAONE'],['tts','TTS','CosyVoice3'],['mem','기억','RAG']];
+function Console({f, cfg}){
+  const term=useRef(null);
+  useEffect(()=>{ if(term.current) term.current.scrollTop=term.current.scrollHeight; },[f.logs]);
+  const pulse = f.status==='CALL'?'pulse-accent' : f.status==='ORCH'?'pulse-amber':'';
+  const dotc = f.status==='CALL'?'accent' : f.status==='ORCH'?'amber':'';
+  const n=cfg.cycle.length; const prog = f.cycleIdx<0?0 : (f.cycleIdx/(n-1))*100;
+  const P=f.panel;
+  return (
+    <div className="col">
+      <div className="role"><span className="chip"><span className="dot" style={{background:'#B5402C'}}/><span className="name">call:one 코어</span></span><span className="sub">실시간 통화 오케스트레이터</span></div>
+      <div className="console">
+        <div className={"oc-mod "+pulse}>
+          <span className="oc-badge"><span className={"oc-dot "+dotc}/>{f.status==='STANDBY'?'SYSTEM STANDBY':'ORCHESTRATING'}</span>
+          <div className="oc-label">{f.label}</div>
+          <div className="oc-cycle">
+            <div className="oc-line"><div className="fill" style={{width:prog+'%'}}/></div>
+            {cfg.cycle.map((lb,i)=>(
+              <div className={"oc-node"+(i===f.cycleIdx?' active':i<f.cycleIdx?' done':'')} key={i}>
+                <div className="oc-cdot">{i+1}</div><div className="oc-clab">{lb}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className={"oc-mod "+pulse} style={{flex:'1 1 auto', minHeight:0, gap:'16px'}}>
+          <div className="oc-chips">
+            {CHIPS.map(([k,cn,cv])=>(
+              <div className={"oc-chip"+(f.chips[k]?' on':'')} key={k}><div className="cn">{cn}</div><div className="cv">{cv}</div></div>
+            ))}
+          </div>
+          <div className="oc-panel">
+            {!P && <div className="oc-empty">파이프라인 대기 중…</div>}
+            {P && P.kind==='wave' && (<div><div className="oc-ptitle">{P.label}</div><div className="anwave" style={{justifyContent:'center'}}>{Array.from({length:15}).map((_,i)=><i key={i} style={{background:'var(--accent2)',animationDelay:(i*0.07)+'s'}}/>)}</div></div>)}
+            {P && P.kind==='persona' && (
+              <div><div className="oc-ptitle">페르소나 카드</div>
+                <div className="persona"><div className="pname">{P.name}</div>
+                  <div className="prow"><div className="k">성격</div><div className="v">{P.personality}</div></div>
+                  <div className="prow"><div className="k">배경</div><div className="v">{P.background}</div></div>
+                  <div className="prow"><div className="k">첫 인사</div><div className="v">“{P.hello}”</div></div>
+                  <div className="pmem"><span className="b">memories · {P.mem}</span> 즉시 회상 가능</div>
+                </div>
+              </div>
+            )}
+            {P && P.kind==='refscan' && (
+              <div><div className="oc-ptitle">화자 분리 · ref 후보</div>
+                <div className="refscan">{P.speakers.map((s,i)=>(
+                  <div className={"spk"+(s.sel?' sel':'')} key={i}>
+                    <div className="top"><span className="id">화자 {s.id} · <span className="who">{s.who}</span></span>{s.sel && <span className="pick">✓ 선택됨</span>}</div>
+                    <div className="bar"><i style={{width:(s.snr*100)+'%'}}/></div>
+                    <div className="meta"><span>SNR {Math.round(s.snr*100)}%</span><span>구간 {s.len}</span></div>
+                  </div>
+                ))}</div>
+              </div>
+            )}
+            {P && P.kind==='twin' && (
+              <div><div className="oc-ptitle">학습 데이터</div>
+                <div className="twin">{P.rows.map((r,i)=>(
+                  <div className={"tr"+(i===P.rows.length-1?' hot':'')} key={i}><span className="tk">{r[0]}</span><span className="tv">{r[1]}</span></div>
+                ))}</div>
+              </div>
+            )}
+            {P && P.kind==='turn' && (
+              <div><div className="oc-ptitle">현재 턴</div>
+                <div className="turn"><span className="tname">▶ {P.name}</span>
+                  <div className="steps">
+                    {[['듣기','ASR','🎧'],['생각','LLM','◍'],['말하기','TTS','◈']].map(([l,m,ic])=>(
+                      <div className={"st"+(P.step===l?' on':'')} key={l}><div className="si">{ic}</div><div className="sl">{l}</div><div className="sm">{m}</div></div>
+                    ))}
+                  </div>
+                  {P.asr && <div className="asrbox"><div className="k">인식된 발화</div><div className="v">“{P.asr}”</div></div>}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="term" ref={term}>
+          {f.logs.map((l,i)=>(
+            <div className="logline" key={i}><span className="logtime">[{l.time}]</span><span className={"logtag t-"+l.tag}>{l.tag.toUpperCase()}</span><span className="logtext">{l.text}</span></div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- app ---------- */
+function App(){
+  const [ci, setCi]=useState(0);
+  const [i, setI]=useState(0);
+  const [playing, setPlaying]=useState(true);
+  const [scale, setScale]=useState(1);
+  const cfg=CASES[ci]; const FR=cfg.frames; const TOTAL=FR.reduce((s,f)=>s+f.dur,0);
+
+  useEffect(()=>{ const fit=()=>setScale(Math.min(window.innerWidth/1920,(window.innerHeight-40)/1080)); fit(); window.addEventListener('resize',fit); return ()=>window.removeEventListener('resize',fit); },[]);
+  useEffect(()=>{
+    if(!playing) return;
+    if(i>=FR.length-1){ const t=setTimeout(()=>setI(0),3600); return ()=>clearTimeout(t); }
+    const t=setTimeout(()=>setI(v=>v+1),FR[i].dur); return ()=>clearTimeout(t);
+  },[i,playing,ci]);
+  useEffect(()=>{
+    const k=(e)=>{ if(e.key===' '){e.preventDefault(); setPlaying(p=>!p);} else if(e.key==='ArrowRight') setI(v=>Math.min(FR.length-1,v+1)); else if(e.key==='ArrowLeft') setI(v=>Math.max(0,v-1)); else if(e.key==='1'){setCi(0);setI(0);setPlaying(true);} else if(e.key==='2'){setCi(1);setI(0);setPlaying(true);} else if(e.key==='3'){setCi(2);setI(0);setPlaying(true);} };
+    window.addEventListener('keydown',k); return ()=>window.removeEventListener('keydown',k);
+  },[FR.length]);
+
+  const f=FR[i];
+  const elapsed=useMemo(()=>FR.slice(0,i).reduce((s,x)=>s+x.dur,0),[i,ci]);
+  const pct=Math.min(100,(elapsed/TOTAL)*100);
+  const seek=(e)=>{ const r=e.currentTarget.getBoundingClientRect(); const ratio=(e.clientX-r.left)/r.width; let acc=0; for(let k=0;k<FR.length;k++){ acc+=FR[k].dur; if(acc/TOTAL>=ratio){ setI(k); return; } } setI(FR.length-1); };
+  const pickCase=(n)=>{ setCi(n); setI(0); setPlaying(true); };
+  const prepModes=['consent','survey','record','plain','doc','incoming'];
+  const partLive = f.speaking==='me' || (f.speaking===null && prepModes.indexOf(f.left.mode)>=0);
+  const cloneLive = f.speaking==='clone' || f.right.mode==='ring' || f.right.mode==='reveal' || (f.right.mode==='end' && f.right.end && f.right.end.kind==='choice');
+
+  return (
+    <div className="viewport"><div className="stagearea"><div className="sizer" style={{width:1920*scale, height:1080*scale}}>
+      <div className="stage" style={{transform:`scale(${scale})`}}>
+        <div className="topbar">
+          <div className="brand"><span className="wm">call<span className="co">:</span>one</span><span className="kick">전시 데모 · Exhibition Cycle</span></div>
+          <div className="tabs">
+            {CASES.map((cc,n)=>(
+              <div className={"tab"+(n===ci?' on':'')} key={cc.key} onClick={()=>pickCase(n)}>
+                <span className="en">{cc.en}</span><span className="ko">{cc.ko}</span>
+              </div>
+            ))}
+          </div>
+          <div className="controls">
+            <button className="ctlbtn" onClick={()=>{setI(0);setPlaying(true);}} title="처음부터"><IRestart/></button>
+            <button className="ctlbtn play" onClick={()=>setPlaying(p=>!p)} title="재생/일시정지">{playing?<IPause/>:<IPlay/>}</button>
+            <div className="track" onClick={seek}><div className="fill" style={{width:pct+'%'}}/></div>
+            <div className="scene"><b>{f.scene}</b></div>
+          </div>
+        </div>
+        <div className="phones">
+          <ParticipantPhone f={f} live={partLive} cfg={cfg}/>
+          <Console f={f} cfg={cfg}/>
+          <ClonePhone f={f} live={cloneLive} cfg={cfg}/>
+        </div>
+      </div>
+    </div></div></div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
