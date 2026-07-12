@@ -1,4 +1,4 @@
-"""AI 인터뷰어 모드 — 트랙③ 《온전히》 풀 클론 제작용 (docs/EXHIBIT_PLAN §4).
+"""AI 인터뷰어 모드 — 트랙③ TWIN 《쌍둥이》 풀 클론 제작용 (demo/EXHIBIT_PLAN §4).
 
 근거: 스탠퍼드 1,052명 생성 에이전트 — American Voices Project 프로토콜 2시간
 반구조화 인터뷰(AI 인터뷰어가 진행, 이전 답 기반 후속질문)로 설문 응답 85% 복제.
