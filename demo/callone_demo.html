@@ -491,37 +491,35 @@ function buildPortrait(){
   return c.F;
 }
 
-/* ---------- ③ TWIN ---------- */
+/* ---------- ③ MAKER — 제작자와의 통화(생각 공유 창) ---------- */
 function buildTwin(){
-  const c=ctx({name:'???', hidden:true}); const {S,push,log,ch,say}=c;
-  S.scene='다큐'; S.status='ORCH'; S.label='사전 제작 사례';
-  S.left={mode:'doc', doc:{kick:'TWIN · 협력자 사례', title:'협력자 · 준호', stats:['일상 녹음 42시간','심층 인터뷰 2시간','LoRA 말투 튜닝','기억 1,240건']}};
-  log('system','TWIN 사례 로드 · 준호 클론'); push(2900);
-  S.panel={kind:'twin', rows:[['일상 녹음','42h'],['심층 인터뷰','2h'],['말투 튜닝','LoRA'],['기억 RAG','1,240'],['지인 오인율','44%']]}; push(2400);
-  S.scene='블라인드'; S.status='ORCH'; S.label='블라인드 연결';
-  S.left={mode:'incoming', incoming:{from:'알 수 없는 번호', note:'상대가 사람인지 AI인지 모릅니다 · 3분간 자유롭게'}};
-  S.right={...S.right, mode:'ring', revealed:false}; log('system','블라인드 통화 · 신원 비공개'); push(2300);
-  S.scene='통화'; S.cycleIdx=2; S.status='CALL'; S.label='통화 중'; S.left={mode:'call'};
-  S.right={...S.right, mode:'call', revealed:false, name:'???'}; S.speaking='clone'; ch('llm','tts');
-  say('상대','여보세요, 안녕하세요. 연결됐네요.'); S.panel={kind:'turn', step:'말하기', name:'???'}; log('tts','CosyVoice3 스트리밍'); push(2300);
-  S.speaking='me'; ch('asr'); say('나','아, 네 안녕하세요. 뭘 물어보면 되죠?'); S.panel={kind:'turn', step:'듣기', name:'???', asr:'뭘 물어보면 되죠?'}; log('asr','인식: "뭘 물어보면 되죠?"'); push(1900);
-  S.speaking='clone'; ch('llm','tts'); say('상대','아무거나요, 편하게. 저 오늘 아침에 커피 내리다 유리잔 깨먹었어요. 시작이 좀 그랬죠.');
-  S.panel={kind:'turn', step:'생각', name:'???', asr:'뭘 물어보면 되죠?'}; log('memory','회상: 성격 · 덜렁댐'); log('llm','응답 생성'); push(2800);
-  S.speaking='me'; ch('asr'); say('나','하하 저런. 자주 그러세요?'); S.panel={kind:'turn', step:'듣기', name:'???', asr:'자주 그러세요?'}; log('asr','인식: "자주 그러세요?"'); push(1800);
-  S.speaking='clone'; ch('llm','tts'); say('상대','덜렁대는 편이에요. 어릴 때부터 그랬대요. 근데 그쪽은요? 전시 어때요?');
-  S.panel={kind:'turn', step:'말하기', name:'???'}; log('llm','되물음 생성 · 자연스러운 화제 전환'); push(2700);
-  S.speaking='me'; ch('asr'); say('나','신기해요. 근데 이게 사람인지 아닌지 모르겠어서.'); S.panel={kind:'turn', step:'듣기', name:'???', asr:'사람인지 아닌지'}; log('asr','인식: "사람인지 아닌지"'); push(2000);
-  S.speaking='clone'; ch('llm','tts'); say('상대','하하, 그 얘기 많이 들어요. 제가 사람 같아요, 아니면 좀 이상해요?');
-  S.panel={kind:'turn', step:'말하기', name:'???'}; log('llm','응답 생성'); push(2600);
-  S.speaking='me'; ch('asr'); say('나','너무 자연스러운데요. 말 끊는 것도 그렇고.'); S.panel={kind:'turn', step:'듣기', name:'???', asr:'너무 자연스러운데'}; log('asr','인식: "너무 자연스러운데"'); push(1900);
-  S.speaking='clone'; ch('llm','tts'); say('상대','다행이네요. 저는 그냥 전데. …아, 시간이 다 됐대요. 재밌었어요.');
-  S.panel={kind:'turn', step:'말하기', name:'???'}; log('tts','마지막 출력'); push(2700);
-  S.scene='질문'; S.cycleIdx=3; S.status='ORCH'; S.label='블라인드 질문'; S.speaking=null; ch();
-  S.left={mode:'plain', plain:{kind:'question', big:'방금 상대는\n사람이었을까요?', opts:['사람','AI']}};
-  S.right={...S.right, mode:'end', end:{kind:'fade', text:'통화 종료'}}; S.panel=null; log('system','블라인드 질문 제시'); push(3200);
-  S.scene='리빌'; S.status='STANDBY'; S.label='리빌';
-  S.right={...S.right, mode:'reveal', revealed:true, reveal:{name:'준호', line:'안녕하세요, 진짜 준호입니다.\n방금 그건 제 목소리로 만든 클론이었어요.', stat:'지인 44%가 저인 줄 알았습니다 (IMPersona, 2025)'}};
-  log('system','리빌 · 실제 인물 공개'); push(4800);
+  const c=ctx({name:'제작자'}); const {S,push,log,ch,say}=c;
+  S.scene='제작자'; S.status='ORCH'; S.label='제작자 클론 로드';
+  S.left={mode:'doc', doc:{kick:'MAKER · 만든 사람', title:'제작자 · 정원', stats:['제작자 인터뷰 2시간','생각·가치관 기록','LoRA 말투 튜닝','기억 320건']}};
+  log('system','제작자 클론 로드 · 인터뷰 기반'); push(2900);
+  S.panel={kind:'twin', rows:[['제작자 인터뷰','2h'],['생각 기록','320'],['말투 튜닝','LoRA'],['기억 RAG','320'],['지금 제작자','부재']]}; push(2400);
+  S.scene='연결'; S.status='ORCH'; S.label='연결';
+  S.left={mode:'incoming', incoming:{from:'제작자', note:'이 전시를 만든 사람이 전화를 겁니다'}};
+  S.right={...S.right, mode:'ring', revealed:true}; log('system','제작자 발신'); push(2200);
+  S.scene='대화'; S.cycleIdx=2; S.status='CALL'; S.label='통화 중'; S.left={mode:'call'};
+  S.right={...S.right, mode:'call', revealed:true, name:'제작자'}; S.speaking='clone'; ch('llm','tts','mem');
+  say('상대','여보세요. …안녕하세요. 이 목소리, 이 전시를 만든 사람이에요. 정확히는 그 사람 목소리로 만든 클론이고요.');
+  S.panel={kind:'turn', step:'말하기', name:'제작자'}; log('tts','CosyVoice3 스트리밍(제작자 음색)'); push(3000);
+  S.speaking='me'; ch('asr'); say('나','아 진짜요? 왜 이런 걸 만들었어요?'); S.panel={kind:'turn', step:'듣기', name:'제작자', asr:'왜 만들었어요?'}; log('asr','인식: "왜 만들었어요?"'); push(2000);
+  S.speaking='clone'; ch('llm','tts','mem'); say('상대','누군가의 목소리가 사라지는 게 늘 무서웠어요. 그래서 붙잡아두면 어떨까 했죠. 근데 만들다 보니, 목소리만으론 안 되더라고요. 기억이랑 말투가 같이 있어야 그 사람 같았어요.');
+  S.panel={kind:'turn', step:'말하기', name:'제작자'}; log('memory','회상: 제작 동기 · 상실'); log('llm','응답 생성'); push(3300);
+  S.speaking='me'; ch('asr'); say('나','그럼 이게 진짜 그 사람이라고 할 수 있어요?'); S.panel={kind:'turn', step:'듣기', name:'제작자', asr:'진짜 그 사람인가'}; log('asr','인식: "진짜 그 사람이에요?"'); push(2000);
+  S.speaking='clone'; ch('llm','tts'); say('상대','아니요. 그건 아니에요. 그 사람이 아니라, 그 사람을 아주 많이 닮은 메아리예요. 앞의 두 전화기도 다 그 얘기예요.');
+  S.panel={kind:'turn', step:'말하기', name:'제작자'}; log('llm','응답 생성 · 대체 아닌 메아리'); push(3000);
+  S.speaking='me'; ch('asr'); say('나','지금 당신은요? 진짜 제작자랑 통화하는 거예요?'); S.panel={kind:'turn', step:'듣기', name:'제작자', asr:'지금 당신은?'}; log('asr','인식: "지금 당신은?"'); push(2000);
+  S.speaking='clone'; ch('llm','tts','mem'); say('상대','목소리도 생각도 저한테서 왔으니, 맞아요. 근데 저는 지금 여기 없어요. 이게 제가 하고 싶었던 실험이에요 — 사람이 없어도, 그 사람과 이야기할 수 있을까.');
+  S.panel={kind:'turn', step:'말하기', name:'제작자'}; log('memory','회상: 전시 주제 · 부재'); push(3400);
+  S.scene='맺음'; S.status='CALL'; S.label='작별'; S.speaking='clone'; ch('llm','tts');
+  say('상대','와 줘서 고마워요. 당신 목소리도, 언젠가 누군가에게 이렇게 남을 수 있어요. 끊을게요. …잘 지내요.');
+  log('tts','마지막 출력'); push(3100);
+  S.scene='서명'; S.cycleIdx=3; S.status='STANDBY'; S.label='맺음'; S.speaking=null; ch();
+  S.right={...S.right, mode:'reveal', revealed:true, reveal:{name:'제작자', line:'방금 당신은,\n이 전시를 만든 사람과 통화했습니다.', stat:'목소리와 생각 모두 제작자에게서 — 지금 제작자는 이 자리에 없습니다'}}; S.panel=null;
+  log('system','맺음 · 제작자 서명'); push(4800);
   return c.F;
 }
 
@@ -531,7 +529,7 @@ function withTimer(F){ let t=0; for(const f of F){ if(f.left && f.left.mode==='c
 const CASES=[
   {key:'echo', en:'ECHO', ko:'메아리', pName:'참가자', pSub:'현장 워크인', cName:'10년 뒤의 나', cSub:'제로샷 클론', cycle:['설문','목소리','통화','여운'], frames:withTimer(buildEcho())},
   {key:'portrait', en:'PORTRAIT', ko:'음성 초상', pName:'참가자', pSub:'예약 · 녹음 지참', cName:'소중한 사람', cSub:'화자분리 → ref', cycle:['분석','목소리','통화','선택'], frames:withTimer(buildPortrait())},
-  {key:'twin', en:'TWIN', ko:'쌍둥이', pName:'관람객', pSub:'블라인드 체험', cName:'협력자의 클론', cSub:'LoRA + 기억 풀', cycle:['학습','목소리','통화','리빌'], frames:withTimer(buildTwin())},
+  {key:'twin', en:'MAKER', ko:'제작자', pName:'관람객', pSub:'만든 사람과 통화', cName:'제작자', cSub:'인터뷰 클론', cycle:['제작','연결','대화','맺음'], frames:withTimer(buildTwin())},
 ];
 
 /* ---------- small pieces ---------- */

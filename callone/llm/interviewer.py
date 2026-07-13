@@ -1,11 +1,12 @@
-"""AI 인터뷰어 모드 — 트랙③ TWIN 《쌍둥이》 풀 클론 제작용 (demo/EXHIBIT_PLAN §4).
+"""AI 인터뷰어 모드 — 트랙③ MAKER 《제작자》 딥클론 제작용 (demo/EXHIBIT_PLAN §4).
 
 근거: 스탠퍼드 1,052명 생성 에이전트 — American Voices Project 프로토콜 2시간
 반구조화 인터뷰(AI 인터뷰어가 진행, 이전 답 기반 후속질문)로 설문 응답 85% 복제.
-여기선 그 프로토콜의 한국어 변형: callone 이 전화를 걸어 협력자를 인터뷰한다 —
+여기선 그 프로토콜의 한국어 변형: callone 이 전화를 걸어 제작자(또는 대상)를 인터뷰한다 —
 "클론이 스스로 물어보며 자란다". 전사본은 remember_from_history 로 기억화.
+트랙③에선 대상이 제작자 본인 — 제작 동기·전시 주제에 대한 생각을 기억으로 축적한다.
 
-사용: 통화 셋업에서 interviewer_card() 카드를 적용하고 협력자와 통화.
+사용: 통화 셋업에서 interviewer_card() 카드를 적용하고 대상과 통화.
 질문 리스트가 카드(situation)에 통째로 들어가 LLM 이 순서대로 진행한다.
 """
 from __future__ import annotations
